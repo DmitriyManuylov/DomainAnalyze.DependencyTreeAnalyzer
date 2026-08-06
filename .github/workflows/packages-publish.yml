@@ -1,0 +1,64 @@
+name: Packages Publishing
+
+on:
+  push:
+    tags: 'v*'
+
+permissions:
+  id-token: write
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+ 
+    runs-on: windows-latest
+
+    steps:
+    - name: GetTagVersion
+      id: get-tag-version
+      shell: pwsh
+      run: |
+        # Регулярное выражение для полного соответствия (с префиксом v)
+        $fullPattern = '^v\d+\.\d+\.\d+$'
+        $tagName = "${{ github.ref_name }}"
+        
+        if ($tagName -match $fullPattern) {
+            # Если строка соответствует формату "v1.2.3"
+            $tagVersion = $tagName -replace '^v', ''
+        } else {
+            throw "Tag $tagName is not correct version string"
+        }
+        
+        echo "::set-output name=tag-version::$tagVersion"
+        
+    # - name: Show variables
+    # run: echo "${{toJson(steps.get-tag-version.outputs)}}"
+        
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 1
+
+    # Install the .NET Core workload
+    - name: Install .NET Core
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: 10.0.x
+
+    # Add  MSBuild to the PATH: https://github.com/microsoft/setup-msbuild
+    - name: Setup MSBuild.exe
+      uses: microsoft/setup-msbuild@v2
+      
+    - name: Build projects    
+      run: |
+        dotnet build -c Release DomainAnalyze.DependencyTree/DomainAnalyze.DependencyTree.csproj
+      
+    - name: Pack projects
+      run: |
+        dotnet pack -c Release --version ${{ steps.get-tag-version.outputs.tag-version }} -o artifacts DomainAnalyze.DependencyTree/DomainAnalyze.DependencyTree.csproj
+
+    # Push to Nuget.org
+    - name: NuGet push
+      run: |
+        dotnet nuget push "artifacts/DomainAnalyze.DependencyTree.${{ steps.get-tag-version.outputs.tag-version }}.nupkg" --api-key ${{ secrets.PACKAGESTOKEN }} --source https://nuget.pkg.github.com/DmitriyManuylov/index.json
