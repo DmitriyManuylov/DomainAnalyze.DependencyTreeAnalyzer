@@ -12,7 +12,11 @@ namespace DomainAnalyze.DependencyTree.Utilities.Extensions
     {
         public static IMethodBodyOperation GetMethodBodyOperation(this IMethodSymbol methodSymbol, SemanticModel semanticModel)
         {
-            var methodSyntax = methodSymbol.DeclaringSyntaxReferences.FirstOrDefault().GetSyntax();
+            var methodSyntax = methodSymbol.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax();
+
+            if (methodSyntax is null)
+                return null;
+
             IOperation op = null;
 
             try
