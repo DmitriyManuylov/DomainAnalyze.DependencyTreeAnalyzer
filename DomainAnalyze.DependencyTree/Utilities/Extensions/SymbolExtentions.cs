@@ -13,7 +13,7 @@ namespace DomainAnalyze.DependencyTree.Utilities.Extensions
         public static Project GetProject(this ISymbol symbol, Solution solution)
         {
             var syntaxTree = symbol.DeclaringSyntaxReferences.FirstOrDefault().SyntaxTree;
-            var project = solution.Projects.FirstOrDefault(item => syntaxTree.FilePath.Contains(Path.GetDirectoryName(item.FilePath)));
+            var project = solution.Projects.Where(item => syntaxTree.FilePath.Contains(Path.GetDirectoryName(item.FilePath))).OrderByDescending(item => Path.GetDirectoryName(item.FilePath).Length).FirstOrDefault();
 
             return project;
         }

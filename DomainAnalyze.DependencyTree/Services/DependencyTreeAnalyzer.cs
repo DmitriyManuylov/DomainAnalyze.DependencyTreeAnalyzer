@@ -23,7 +23,10 @@ namespace DomainAnalyze.DependencyTree.Services
         protected Solution Solution { get; private init; }
         protected HashSet<INamedTypeSymbol> SolutionClasses = new HashSet<INamedTypeSymbol>(NamedTypeEqualityComparer.Instance);
         protected HashSet<INamedTypeSymbol> DIImplementations = new HashSet<INamedTypeSymbol>(NamedTypeEqualityComparer.Instance);
+
+        private HashSet<INamedTypeSymbol> ProcessedInjections = new HashSet<INamedTypeSymbol>(NamedTypeEqualityComparer.Instance);
         protected NamedTypeSymbolTree SymbolTree { get; private init; }
+        protected Dictionary<IPropertySymbol, IFieldSymbol> PropertiesToFieldsMapping = new Dictionary<IPropertySymbol, IFieldSymbol>(PropertySymbolEqualityComparer.Instance);
 
         protected Dictionary<INamedTypeSymbol, List<INamedTypeSymbol>> InterfacesImplementations = new Dictionary<INamedTypeSymbol, List<INamedTypeSymbol>>(NamedTypeEqualityComparer.Instance);
         private List<IDependencyRegistrationsSearcher> DependencyRegistrationSearchersList = new List<IDependencyRegistrationsSearcher>();
@@ -68,6 +71,16 @@ namespace DomainAnalyze.DependencyTree.Services
                     NamedTypeEqualityComparer.Instance.Equals(bind.Interface, item.Type as INamedTypeSymbol))))
                 .ToList();
 
+            foreach(var fieldNode in SymbolTree.Fields)
+            {
+                var prop = fieldNode.FieldSymbol.GetAssociatedProperty();
+
+                if (prop is null)
+                    continue;
+
+                PropertiesToFieldsMapping.TryAdd(prop, fieldNode.FieldSymbol);
+            }
+
             await InnerAnalyze();
 
         }
@@ -76,16 +89,18 @@ namespace DomainAnalyze.DependencyTree.Services
 
         private List<IFieldSymbol> BuildDependenciesList(INamedTypeSymbol type)
         {
-            DependencyStack.Push(type);
-            if (type is null)
-            {
+            if (ProcessedInjections.Contains(type))
                 return new List<IFieldSymbol>();
-            }
+
+            if (type is null)
+                return new List<IFieldSymbol>();
+
+            DependencyStack.Push(type);
 
             var currentTreeNode = SymbolTree.FindNode(type);
 
             var result = new List<IFieldSymbol>();
-            currentTreeNode = SymbolTree.FindNode(type);
+
             var deps = FindTypeDependencies(type);
 
             result.AddRange(deps);
@@ -110,10 +125,6 @@ namespace DomainAnalyze.DependencyTree.Services
                 {
                     currentTreeNode.AddChildrenNode(dep, implement);
 
-                    var dependencyNode = SymbolTree.FindNode(implement);
-                    if (dependencyNode is not null)
-                        continue;
-
                     if (DependencyStack.Contains(implement, NamedTypeEqualityComparer.Instance))
                         continue;
 
@@ -124,7 +135,7 @@ namespace DomainAnalyze.DependencyTree.Services
             }
 
             DependencyStack.Pop();
-
+            ProcessedInjections.Add(type);
             return result;
         }
 

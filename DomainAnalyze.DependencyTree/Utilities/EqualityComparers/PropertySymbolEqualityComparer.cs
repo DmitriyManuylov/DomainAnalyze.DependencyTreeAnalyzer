@@ -9,17 +9,17 @@ using System.Threading.Tasks;
 
 namespace DomainAnalyze.DependencyTree.Utilities.EqualityComparers
 {
-    public class FieldSymbolEqualityComparer : IEqualityComparer<IFieldSymbol>
+    internal class PropertySymbolEqualityComparer : IEqualityComparer<IPropertySymbol>
     {
-        private static readonly FieldSymbolEqualityComparer instance = new FieldSymbolEqualityComparer();
-        public static FieldSymbolEqualityComparer Instance => instance;
+        private static readonly PropertySymbolEqualityComparer instance = new PropertySymbolEqualityComparer();
+        public static PropertySymbolEqualityComparer Instance => instance;
 
-        public bool Equals(IFieldSymbol x, IFieldSymbol y)
+        public bool Equals(IPropertySymbol x, IPropertySymbol y)
         {
             return x.Name == y.Name && NamedTypeEqualityComparer.Instance.Equals(x.Type as INamedTypeSymbol, y.Type as INamedTypeSymbol) && NamedTypeEqualityComparer.Instance.Equals(x.ContainingType, y.ContainingType);
         }
 
-        public int GetHashCode([DisallowNull] IFieldSymbol obj)
+        public int GetHashCode([DisallowNull] IPropertySymbol obj)
         {
             return HashCode.Combine(obj.Name, obj.Type.Name, obj.Type.ContainingNamespace.NamespaceFullName(), obj.ContainingType.Name, obj.ContainingType.ContainingNamespace.NamespaceFullName());
         }

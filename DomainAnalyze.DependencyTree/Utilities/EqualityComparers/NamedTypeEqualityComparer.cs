@@ -12,6 +12,8 @@ namespace DomainAnalyze.DependencyTree.Utilities.EqualityComparers
     public class NamedTypeEqualityComparer : IEqualityComparer<INamedTypeSymbol>
     {
         private static readonly NamedTypeEqualityComparer instance = new();
+        public static NamedTypeEqualityComparer Instance => instance;
+
         public bool Equals(INamedTypeSymbol x, INamedTypeSymbol y)
         {
             return x.Name == y.Name && x.ContainingNamespace.NamespaceFullName() == y.ContainingNamespace.NamespaceFullName();
@@ -21,8 +23,6 @@ namespace DomainAnalyze.DependencyTree.Utilities.EqualityComparers
         {
             return HashCode.Combine(obj.Name, obj.ContainingNamespace.NamespaceFullName());
         }
-
-        public static NamedTypeEqualityComparer Instance => instance;
     }
 
 }
