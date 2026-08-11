@@ -29,6 +29,11 @@ namespace DomainAnalyze.DependencyTree.Services
         protected Dictionary<IPropertySymbol, IFieldSymbol> PropertiesToFieldsMapping = new Dictionary<IPropertySymbol, IFieldSymbol>(PropertySymbolEqualityComparer.Instance);
         protected Dictionary<IFieldSymbol, List<IInvocationOperation>> FieldsInvocations = new Dictionary<IFieldSymbol, List<IInvocationOperation>>(FieldSymbolEqualityComparer.Instance);
 
+        /// <summary>
+        /// Вызовы собственных методов класса
+        /// </summary>
+        protected Dictionary<IMethodSymbol, List<IInvocationOperation>> OwnCallsMapping = new Dictionary<IMethodSymbol, List<IInvocationOperation>>(MethodSymbolEqualityComparer.Instance);
+
         protected Dictionary<INamedTypeSymbol, List<INamedTypeSymbol>> InterfacesImplementations = new Dictionary<INamedTypeSymbol, List<INamedTypeSymbol>>(NamedTypeEqualityComparer.Instance);
         private List<IDependencyRegistrationsSearcher> DependencyRegistrationSearchersList = new List<IDependencyRegistrationsSearcher>();
 
@@ -83,6 +88,7 @@ namespace DomainAnalyze.DependencyTree.Services
             }
 
             SearchInvocations();
+            await SearchOwnInvocationsAsync();
 
             await InnerAnalyze();
 
@@ -315,6 +321,34 @@ namespace DomainAnalyze.DependencyTree.Services
                     invocations = new List<IInvocationOperation>();
                     invocations.Add(inv);
                     FieldsInvocations.TryAdd(field.FieldSymbol, invocations);
+                }
+            }
+        }
+
+        private async Task SearchOwnInvocationsAsync()
+        {
+            foreach (var dep in DIImplementations)
+            {
+                var methods = dep
+                    .GetMembers()
+                    .OfType<IMethodSymbol>();
+
+                foreach(var method in methods.Where(item => !item.IsImplicitlyDeclared))
+                {
+                    var semanticModel = await method.GetSemanticModelAsync(this.Solution);
+                    var allInvocations = method.GetMethodBodyOperation(semanticModel)
+                        .Descendants()
+                        .OfType<IInvocationOperation>()
+                        .Where(invocation => MethodSymbolEqualityComparer.Instance.Equals(invocation.TargetMethod, invocation.GetOuterMethodSymbol()));
+
+                    if (OwnCallsMapping.TryGetValue(method, out var invocations))
+                    {
+                        invocations.AddRange(allInvocations);
+                        continue;
+                    }
+
+                    invocations = new List<IInvocationOperation>();
+                    OwnCallsMapping.TryAdd(method, invocations);
                 }
             }
         }
