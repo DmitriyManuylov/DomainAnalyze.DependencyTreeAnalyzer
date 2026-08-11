@@ -56,7 +56,7 @@ jobs:
       
     - name: Pack projects
       run: |
-        dotnet pack -c Release --version ${{ steps.get-tag-version.outputs.tag-version }} -o artifacts DomainAnalyze.DependencyTree/DomainAnalyze.DependencyTree.csproj
+        dotnet pack -c Release --version ${{ steps.get-tag-version.outputs.tag-version }} -p:IncludeSymbols=true -p:SymbolPackageFormat=snupkg -o artifacts DomainAnalyze.DependencyTree/DomainAnalyze.DependencyTree.csproj
 
     # Push to Nuget.org
     - name: NuGet push
