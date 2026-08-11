@@ -27,6 +27,7 @@ namespace DomainAnalyze.DependencyTree.Services
         private HashSet<INamedTypeSymbol> ProcessedInjections = new HashSet<INamedTypeSymbol>(NamedTypeEqualityComparer.Instance);
         protected NamedTypeSymbolTree SymbolTree { get; private init; }
         protected Dictionary<IPropertySymbol, IFieldSymbol> PropertiesToFieldsMapping = new Dictionary<IPropertySymbol, IFieldSymbol>(PropertySymbolEqualityComparer.Instance);
+        protected Dictionary<IFieldSymbol, List<IInvocationOperation>> FieldsInvocations = new Dictionary<IFieldSymbol, List<IInvocationOperation>>(FieldSymbolEqualityComparer.Instance);
 
         protected Dictionary<INamedTypeSymbol, List<INamedTypeSymbol>> InterfacesImplementations = new Dictionary<INamedTypeSymbol, List<INamedTypeSymbol>>(NamedTypeEqualityComparer.Instance);
         private List<IDependencyRegistrationsSearcher> DependencyRegistrationSearchersList = new List<IDependencyRegistrationsSearcher>();
@@ -80,6 +81,8 @@ namespace DomainAnalyze.DependencyTree.Services
 
                 PropertiesToFieldsMapping.TryAdd(prop, fieldNode.FieldSymbol);
             }
+
+            SearchInvocations();
 
             await InnerAnalyze();
 
@@ -264,6 +267,56 @@ namespace DomainAnalyze.DependencyTree.Services
             }
 
             return dependencyRegistrations;
+        }
+
+        private void SearchInvocations()
+        {
+            foreach (var field in SymbolTree.Fields)
+            {
+                var propertiesRefInvocations = field
+                    .ContainingTypeNode
+                    .Symbol
+                    .GetMembers()
+                    .OfType<IPropertyReferenceOperation>()
+                    .Where(item => PropertiesToFieldsMapping.TryGetValue(item.Property, out var outField) && FieldSymbolEqualityComparer.Instance.Equals(outField, field.FieldSymbol))
+                    .Select(item => item.Parent as IInvocationOperation)
+                    .Where(item => item is not null);
+
+                foreach (var inv in propertiesRefInvocations)
+                {
+                    if (FieldsInvocations.TryGetValue(field.FieldSymbol, out var invocations))
+                    {
+                        invocations.Add(inv);
+                        continue;
+                    }
+
+                    invocations = new List<IInvocationOperation>();
+                    invocations.Add (inv);
+                    FieldsInvocations.TryAdd(field.FieldSymbol, invocations);
+                }
+
+                var fieldsRefInvocations = field
+                    .ContainingTypeNode
+                    .Symbol
+                    .GetMembers()
+                    .OfType<IFieldReferenceOperation>()
+                    .Where(item => FieldSymbolEqualityComparer.Instance.Equals(item.Field, field.FieldSymbol))
+                    .Select(item => item.Parent as IInvocationOperation)
+                    .Where(item => item is not null); ;
+
+                foreach(var inv in fieldsRefInvocations)
+                {
+                    if (FieldsInvocations.TryGetValue(field.FieldSymbol, out var invocations))
+                    {
+                        invocations.Add(inv);
+                        continue;
+                    }
+
+                    invocations = new List<IInvocationOperation>();
+                    invocations.Add(inv);
+                    FieldsInvocations.TryAdd(field.FieldSymbol, invocations);
+                }
+            }
         }
 
         public void SetDependencyRegistrationsSearcher<TType>() where TType : class, IDependencyRegistrationsSearcher, new()
