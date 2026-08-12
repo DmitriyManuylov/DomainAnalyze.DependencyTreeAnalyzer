@@ -393,7 +393,7 @@ namespace DomainAnalyze.DependencyTree.Services
                     var allInvocations = method.GetMethodBodyOperation(semanticModel)
                         .Descendants()
                         .OfType<IInvocationOperation>()
-                        .Where(invocation => MethodSymbolEqualityComparer.Instance.Equals(invocation.TargetMethod, invocation.GetOuterMethodSymbol()));
+                        .Where(invocation => NamedTypeEqualityComparer.Instance.Equals(dep, invocation.TargetMethod.ContainingType));
 
                     if (OwnCallsMapping.TryGetValue(method, out var invocations))
                     {
@@ -402,6 +402,7 @@ namespace DomainAnalyze.DependencyTree.Services
                     }
 
                     invocations = new List<IInvocationOperation>();
+                    invocations.AddRange(invocations);
                     OwnCallsMapping.TryAdd(method, invocations);
                 }
             }
