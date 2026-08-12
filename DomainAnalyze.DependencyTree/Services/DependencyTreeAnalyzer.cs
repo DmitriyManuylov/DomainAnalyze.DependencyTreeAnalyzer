@@ -393,16 +393,20 @@ namespace DomainAnalyze.DependencyTree.Services
                     var allInvocations = method.GetMethodBodyOperation(semanticModel)
                         .Descendants()
                         .OfType<IInvocationOperation>()
-                        .Where(invocation => MethodSymbolEqualityComparer.Instance.Equals(invocation.TargetMethod, invocation.GetOuterMethodSymbol()));
+                        .Where(invocation => NamedTypeEqualityComparer.Instance.Equals(dep, invocation.TargetMethod.ContainingType));
 
-                    if (OwnCallsMapping.TryGetValue(method, out var invocations))
+                    foreach (var invocation in allInvocations)
                     {
-                        invocations.AddRange(allInvocations);
-                        continue;
-                    }
+                        if (OwnCallsMapping.TryGetValue(invocation.TargetMethod, out var invocations))
+                        {
+                            invocations.AddRange(allInvocations);
+                            continue;
+                        }
 
-                    invocations = new List<IInvocationOperation>();
-                    OwnCallsMapping.TryAdd(method, invocations);
+                        invocations = new List<IInvocationOperation>();
+                        invocations.Add(invocation);
+                        OwnCallsMapping.TryAdd(invocation.TargetMethod, invocations);
+                    }
                 }
             }
         }
