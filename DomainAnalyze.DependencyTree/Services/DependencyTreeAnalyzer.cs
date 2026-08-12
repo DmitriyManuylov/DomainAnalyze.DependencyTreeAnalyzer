@@ -10,6 +10,7 @@ using Microsoft.CodeAnalysis.Operations;
 using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Runtime.Intrinsics.Arm;
 using System.Text;
@@ -19,6 +20,8 @@ namespace DomainAnalyze.DependencyTree.Services
 {
     public abstract class DependencyTreeAnalyzer
     {
+        public TimeStampModel TimeStampModel { get; private set; } = new TimeStampModel();
+        private Stopwatch Stopwatch = new Stopwatch();
         private Stack<INamedTypeSymbol> DependencyStack = new Stack<INamedTypeSymbol>();
         protected MSBuildWorkspace Workspace { get; private init; }
         protected Solution Solution { get; private init; }
@@ -42,7 +45,11 @@ namespace DomainAnalyze.DependencyTree.Services
         {
             Workspace = MSBuildWorkspace.Create();
 
+            Stopwatch stopwatch = new Stopwatch();
+            stopwatch.Start();
             Solution = Task.Run(() => Workspace.OpenSolutionAsync(solutionPath)).GetAwaiter().GetResult();
+            stopwatch.Stop();
+            TimeStampModel.SolutionBuildTime = stopwatch.ElapsedMilliseconds;
 
             SymbolTree = new NamedTypeSymbolTree();
         }
@@ -58,27 +65,34 @@ namespace DomainAnalyze.DependencyTree.Services
             foreach(var item in classes)
                 this.SolutionClasses.Add(item);
 
+            Stopwatch stopwatch = new Stopwatch();
+            stopwatch.Start();
             var binds = await GetNinjectRegistrations();
             foreach (var item in binds.Where(item => item.Implementation is not null))
                 DIImplementations.Add(item.Implementation);
+            stopwatch.Stop();
+            TimeStampModel.DependenciesRegistrationSearchTime = stopwatch.ElapsedMilliseconds;
 
+            stopwatch = new Stopwatch();
+            stopwatch.Start();
             var list = GetNinjectInjections();
+            stopwatch.Stop();
+            TimeStampModel.DependenciesSearchTime = stopwatch.ElapsedMilliseconds;
+            //var distinctedDependencies = list
+            //    .Select(item => item.Type as INamedTypeSymbol)
+            //    .Distinct(NamedTypeEqualityComparer.Instance)
+            //    .Select(item => item as INamedTypeSymbol)
+            //    .ToList();
 
-            var distinctedDependencies = list
-                .Select(item => item.Type as INamedTypeSymbol)
-                .Distinct(NamedTypeEqualityComparer.Instance)
-                .Select(item => item as INamedTypeSymbol)
-                .ToList();
+            //var orderedList = list.OrderBy(item => item.Type.Name);
 
-            var orderedList = list.OrderBy(item => item.Type.Name);
+            //List<(IFieldSymbol, DependencyRegistrationModel)> mapping = list
+            //    .Select(item => (item, 
+            //        binds.FirstOrDefault(bind => 
+            //        NamedTypeEqualityComparer.Instance.Equals(bind.Interface, item.Type as INamedTypeSymbol))))
+            //    .ToList();
 
-            List<(IFieldSymbol, DependencyRegistrationModel)> mapping = list
-                .Select(item => (item, 
-                    binds.FirstOrDefault(bind => 
-                    NamedTypeEqualityComparer.Instance.Equals(bind.Interface, item.Type as INamedTypeSymbol))))
-                .ToList();
-
-            foreach(var fieldNode in SymbolTree.Fields)
+            foreach (var fieldNode in SymbolTree.Fields)
             {
                 var prop = fieldNode.FieldSymbol.GetAssociatedProperty();
 
@@ -88,11 +102,18 @@ namespace DomainAnalyze.DependencyTree.Services
                 PropertiesToFieldsMapping.TryAdd(prop, fieldNode.FieldSymbol);
             }
 
+            stopwatch = new Stopwatch();
+            stopwatch.Start();
             await SearchInvocations();
             await SearchOwnInvocationsAsync();
+            stopwatch.Stop();
+            TimeStampModel.InvocationsModelBuildTime = stopwatch.ElapsedMilliseconds;
 
+            stopwatch = new Stopwatch();
+            stopwatch.Start();
             await InnerAnalyze();
-
+            stopwatch.Stop();
+            TimeStampModel.AnalyzeTime = stopwatch.ElapsedMilliseconds;
         }
 
         protected abstract Task InnerAnalyze();
@@ -305,16 +326,16 @@ namespace DomainAnalyze.DependencyTree.Services
                         if (item.Property.Type is not INamedTypeSymbol propType)
                             return false;
 
-                        if (!DIImplementations.Contains(propType))
+                        if (!InterfacesImplementations.ContainsKey(propType))
                             return false;
 
-                        if (!PropertiesToFieldsMapping.TryGetValue(item.Property, out var outField) || (outField is not null))
+                        if (!PropertiesToFieldsMapping.TryGetValue(item.Property, out var outField) || (outField is null))
                             return false;
 
                         return FieldSymbolEqualityComparer.Instance.Equals(outField, field.FieldSymbol);
                     })
                     .Select(item => item.Parent as IInvocationOperation)
-                    .Where(item => item is not null);
+                    .Where(item => item is not null).ToList();
 
                     foreach (var inv in propertiesRefInvocations)
                     {
@@ -334,7 +355,7 @@ namespace DomainAnalyze.DependencyTree.Services
                         .OfType<IFieldReferenceOperation>()
                         .Where(item => FieldSymbolEqualityComparer.Instance.Equals(item.Field, field.FieldSymbol))
                         .Select(item => item.Parent as IInvocationOperation)
-                        .Where(item => item is not null); ;
+                        .Where(item => item is not null).ToList();
 
                     foreach (var inv in fieldsRefInvocations)
                     {
