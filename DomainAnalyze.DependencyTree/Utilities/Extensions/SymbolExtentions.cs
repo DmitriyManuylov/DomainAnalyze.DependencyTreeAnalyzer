@@ -12,7 +12,10 @@ namespace DomainAnalyze.DependencyTree.Utilities.Extensions
     {
         public static Project GetProject(this ISymbol symbol, Solution solution)
         {
-            var syntaxTree = symbol.DeclaringSyntaxReferences.FirstOrDefault().SyntaxTree;
+            var syntaxTree = symbol.DeclaringSyntaxReferences.FirstOrDefault()?.SyntaxTree;
+            if (syntaxTree is null)
+                throw new Exception();
+
             var project = solution.Projects.Where(item => syntaxTree.FilePath.Contains(Path.GetDirectoryName(item.FilePath))).OrderByDescending(item => Path.GetDirectoryName(item.FilePath).Length).FirstOrDefault();
 
             return project;
@@ -20,14 +23,27 @@ namespace DomainAnalyze.DependencyTree.Utilities.Extensions
 
         public static async Task<Compilation> GetCompilationAsync(this ISymbol symbol, Solution solution)
         {
-            return await symbol.GetProject(solution).GetCompilationAsync();
+            var syntaxTree = symbol.DeclaringSyntaxReferences.FirstOrDefault()?.SyntaxTree;
+            if (syntaxTree is null)
+                throw new Exception();
+
+            var project = solution.Projects.Where(item => syntaxTree.FilePath.Contains(Path.GetDirectoryName(item.FilePath))).OrderByDescending(item => Path.GetDirectoryName(item.FilePath).Length).FirstOrDefault();
+            var compilation = await project.GetCompilationAsync();
+
+            return compilation;
         }
 
         public static async Task<SemanticModel> GetSemanticModelAsync(this ISymbol symbol, Solution solution)
         {
-            var compilation = await symbol.GetCompilationAsync(solution);
+            var syntaxTree = symbol.DeclaringSyntaxReferences.FirstOrDefault()?.SyntaxTree;
+            if (syntaxTree is null)
+                throw new Exception();
 
-            return compilation.GetSemanticModel(symbol.DeclaringSyntaxReferences.FirstOrDefault().SyntaxTree);
+            var project = solution.Projects.Where(item => syntaxTree.FilePath.Contains(Path.GetDirectoryName(item.FilePath))).OrderByDescending(item => Path.GetDirectoryName(item.FilePath).Length).FirstOrDefault();
+
+            var compilation = await project.GetCompilationAsync();
+
+            return compilation.GetSemanticModel(syntaxTree);
         }
     }
 }
