@@ -40,6 +40,7 @@ namespace DomainAnalyze.DependencyTree.Services
 
         protected Dictionary<INamedTypeSymbol, List<INamedTypeSymbol>> InterfacesImplementations = new Dictionary<INamedTypeSymbol, List<INamedTypeSymbol>>(NamedTypeEqualityComparer.Instance);
         private List<IDependencyRegistrationsSearcher> DependencyRegistrationSearchersList = new List<IDependencyRegistrationsSearcher>();
+        protected HashSet<INamedTypeSymbol> DIRoots = new HashSet<INamedTypeSymbol>(NamedTypeEqualityComparer.Instance);
 
         public DependencyTreeAnalyzer(string solutionPath)
         {
@@ -173,6 +174,9 @@ namespace DomainAnalyze.DependencyTree.Services
         private List<IFieldSymbol> GetNinjectInjections()
         {
             var types = GetControllers();
+
+            foreach(var type in types)
+                DIRoots.Add(type);
 
             types.ForEach(type =>
             {
@@ -375,38 +379,46 @@ namespace DomainAnalyze.DependencyTree.Services
 
         private async Task SearchOwnInvocationsAsync()
         {
+            foreach(var root in DIRoots)
+                await TypeOwnMethodInvocations(root);
+
             foreach (var dep in DIImplementations)
             {
                 if (dep.TypeKind == TypeKind.Interface)
                     continue;
 
-                var methods = dep
-                    .GetMembers()
-                    .OfType<IMethodSymbol>();
+                await TypeOwnMethodInvocations(dep);
+            }
+        }
 
-                foreach(var method in methods.Where(item => !item.IsImplicitlyDeclared))
+        private async Task TypeOwnMethodInvocations(INamedTypeSymbol dep)
+        {
+            var methods = dep
+                .GetMembers()
+                .OfType<IMethodSymbol>();
+
+            foreach (var method in methods.Where(item => !item.IsImplicitlyDeclared))
+            {
+                if (!method.DeclaringSyntaxReferences.Any())
+                    continue;
+
+                var semanticModel = await method.GetSemanticModelAsync(this.Solution);
+                var allInvocations = method.GetMethodBodyOperation(semanticModel)
+                    .Descendants()
+                    .OfType<IInvocationOperation>()
+                    .Where(invocation => NamedTypeEqualityComparer.Instance.Equals(dep, invocation.TargetMethod.ContainingType));
+
+                foreach (var invocation in allInvocations)
                 {
-                    if (!method.DeclaringSyntaxReferences.Any())
-                        continue;
-
-                    var semanticModel = await method.GetSemanticModelAsync(this.Solution);
-                    var allInvocations = method.GetMethodBodyOperation(semanticModel)
-                        .Descendants()
-                        .OfType<IInvocationOperation>()
-                        .Where(invocation => NamedTypeEqualityComparer.Instance.Equals(dep, invocation.TargetMethod.ContainingType));
-
-                    foreach (var invocation in allInvocations)
+                    if (OwnCallsMapping.TryGetValue(invocation.TargetMethod, out var invocations))
                     {
-                        if (OwnCallsMapping.TryGetValue(invocation.TargetMethod, out var invocations))
-                        {
-                            invocations.AddRange(allInvocations);
-                            continue;
-                        }
-
-                        invocations = new List<IInvocationOperation>();
-                        invocations.Add(invocation);
-                        OwnCallsMapping.TryAdd(invocation.TargetMethod, invocations);
+                        invocations.AddRange(allInvocations);
+                        continue;
                     }
+
+                    invocations = new List<IInvocationOperation>();
+                    invocations.Add(invocation);
+                    OwnCallsMapping.TryAdd(invocation.TargetMethod, invocations);
                 }
             }
         }
