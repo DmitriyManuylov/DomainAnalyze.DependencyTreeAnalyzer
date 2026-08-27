@@ -32,6 +32,7 @@ namespace DomainAnalyze.DependencyTree.Services
         protected NamedTypeSymbolTree SymbolTree { get; private init; }
         protected Dictionary<IPropertySymbol, IFieldSymbol> PropertiesToFieldsMapping = new Dictionary<IPropertySymbol, IFieldSymbol>(PropertySymbolEqualityComparer.Instance);
         protected Dictionary<IFieldSymbol, List<IInvocationOperation>> FieldsInvocations = new Dictionary<IFieldSymbol, List<IInvocationOperation>>(FieldSymbolEqualityComparer.Instance);
+        protected Dictionary<SyntaxTree, SemanticModel> SyntaxTreeSemanticMapping = new Dictionary<SyntaxTree, SemanticModel>(SyntaxTreeEqualityComparer.Instance);
 
         /// <summary>
         /// Вызовы собственных методов класса
@@ -57,6 +58,8 @@ namespace DomainAnalyze.DependencyTree.Services
 
         public async Task Analyze()
         {
+            await BuildSyntaxTreeSemanticModelMapping();
+
             List<INamedTypeSymbol> classes = new();
             foreach (var project in Solution.Projects)
             {
@@ -319,7 +322,7 @@ namespace DomainAnalyze.DependencyTree.Services
                     if (!method.DeclaringSyntaxReferences.Any())
                         continue;
 
-                    var semanticModel = await method.GetSemanticModelAsync(this.Solution);
+                    this.SyntaxTreeSemanticMapping.TryGetValue(method.DeclaringSyntaxReferences.FirstOrDefault().SyntaxTree, out var semanticModel);
                     var methodBody = method.GetMethodBodyOperation(semanticModel);
 
                     var propertiesRefInvocations = methodBody
@@ -402,7 +405,8 @@ namespace DomainAnalyze.DependencyTree.Services
                 if (!method.DeclaringSyntaxReferences.Any())
                     continue;
 
-                var semanticModel = await method.GetSemanticModelAsync(this.Solution);
+                this.SyntaxTreeSemanticMapping.TryGetValue(method.DeclaringSyntaxReferences.FirstOrDefault().SyntaxTree, out var semanticModel);
+
                 var allInvocations = method.GetMethodBodyOperation(semanticModel)
                     .Descendants()
                     .OfType<IInvocationOperation>()
@@ -419,6 +423,19 @@ namespace DomainAnalyze.DependencyTree.Services
                     invocations = new List<IInvocationOperation>();
                     invocations.Add(invocation);
                     OwnCallsMapping.TryAdd(invocation.TargetMethod, invocations);
+                }
+            }
+        }
+
+        private async Task BuildSyntaxTreeSemanticModelMapping()
+        {
+            foreach (var project in this.Solution.Projects)
+            {
+                var compilation = await project.GetCompilationAsync();
+                foreach (var doc in project.Documents)
+                {
+                    var syntaxTree = await doc.GetSyntaxTreeAsync();
+                    this.SyntaxTreeSemanticMapping.TryAdd(syntaxTree, compilation.GetSemanticModel(syntaxTree));
                 }
             }
         }
