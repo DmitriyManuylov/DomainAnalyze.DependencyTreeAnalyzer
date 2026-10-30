@@ -46,7 +46,8 @@ namespace DomainAnalyze.DependencyTree.Models.SymbolTreeModels
 
             this.Tree.Fields.Add(field);
 
-            childNode.ParentList.Add(field);
+            if (childNode.ParentList is not null)
+                childNode.ParentList.Add(field);
 
             ChildrenList.Add(field);
 

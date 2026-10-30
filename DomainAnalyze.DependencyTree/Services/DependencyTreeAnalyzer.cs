@@ -45,6 +45,7 @@ namespace DomainAnalyze.DependencyTree.Services
 
         public DependencyTreeAnalyzer(string solutionPath)
         {
+            Microsoft.Build.Locator.MSBuildLocator.RegisterDefaults();
             Workspace = MSBuildWorkspace.Create();
 
             Stopwatch stopwatch = new Stopwatch();
