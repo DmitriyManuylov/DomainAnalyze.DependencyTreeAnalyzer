@@ -20,41 +20,86 @@ namespace DomainAnalyze.DependencyTree.Services
 {
     public abstract class DependencyTreeAnalyzer
     {
-        public TimeStampModel TimeStampModel { get; private set; } = new TimeStampModel();
+        public TimeStampModel TimeStampModel { get; private set; }
         private Stopwatch Stopwatch = new Stopwatch();
-        private Stack<INamedTypeSymbol> DependencyStack = new Stack<INamedTypeSymbol>();
-        protected MSBuildWorkspace Workspace { get; private init; }
-        protected Solution Solution { get; private init; }
-        protected HashSet<INamedTypeSymbol> SolutionClasses = new HashSet<INamedTypeSymbol>(NamedTypeEqualityComparer.Instance);
-        protected HashSet<INamedTypeSymbol> DIImplementations = new HashSet<INamedTypeSymbol>(NamedTypeEqualityComparer.Instance);
+        private Stack<INamedTypeSymbol> DependencyStack;
+        protected MSBuildWorkspace Workspace { get; private set; }
+        protected Solution Solution { get; private set; }
+        protected HashSet<INamedTypeSymbol> SolutionClasses;
+        protected HashSet<INamedTypeSymbol> DIImplementations;
 
-        private HashSet<INamedTypeSymbol> ProcessedInjections = new HashSet<INamedTypeSymbol>(NamedTypeEqualityComparer.Instance);
-        protected NamedTypeSymbolTree SymbolTree { get; private init; }
-        protected Dictionary<IPropertySymbol, IFieldSymbol> PropertiesToFieldsMapping = new Dictionary<IPropertySymbol, IFieldSymbol>(PropertySymbolEqualityComparer.Instance);
-        protected Dictionary<IFieldSymbol, List<IInvocationOperation>> FieldsInvocations = new Dictionary<IFieldSymbol, List<IInvocationOperation>>(FieldSymbolEqualityComparer.Instance);
-        protected Dictionary<SyntaxTree, SemanticModel> SyntaxTreeSemanticMapping = new Dictionary<SyntaxTree, SemanticModel>(SyntaxTreeEqualityComparer.Instance);
+        private HashSet<INamedTypeSymbol> ProcessedInjections;
+        protected NamedTypeSymbolTree SymbolTree { get; private set; }
+        protected Dictionary<IPropertySymbol, IFieldSymbol> PropertiesToFieldsMapping;
+        protected Dictionary<IFieldSymbol, List<IInvocationOperation>> FieldsInvocations;
+        protected Dictionary<SyntaxTree, SemanticModel> SyntaxTreeSemanticMapping;
 
         /// <summary>
         /// Вызовы собственных методов класса
         /// </summary>
-        protected Dictionary<IMethodSymbol, List<IInvocationOperation>> OwnCallsMapping = new Dictionary<IMethodSymbol, List<IInvocationOperation>>(MethodSymbolEqualityComparer.Instance);
+        protected Dictionary<IMethodSymbol, List<IInvocationOperation>> OwnCallsMapping;
 
-        protected Dictionary<INamedTypeSymbol, List<INamedTypeSymbol>> InterfacesImplementations = new Dictionary<INamedTypeSymbol, List<INamedTypeSymbol>>(NamedTypeEqualityComparer.Instance);
-        private List<IDependencyRegistrationsSearcher> DependencyRegistrationSearchersList = new List<IDependencyRegistrationsSearcher>();
-        protected HashSet<INamedTypeSymbol> DIRoots = new HashSet<INamedTypeSymbol>(NamedTypeEqualityComparer.Instance);
+        protected Dictionary<INamedTypeSymbol, List<INamedTypeSymbol>> InterfacesImplementations;
+        private List<IDependencyRegistrationsSearcher> DependencyRegistrationSearchersList;
+        protected HashSet<INamedTypeSymbol> DIRoots;
+
+        private object ChangedHadlerLocker = new object;
+
+        private void Init()
+        {
+            TimeStampModel = new TimeStampModel();
+            Stopwatch = new Stopwatch();
+            DependencyStack = new Stack<INamedTypeSymbol>();
+            SolutionClasses = new HashSet<INamedTypeSymbol>(NamedTypeEqualityComparer.Instance);
+            DIImplementations = new HashSet<INamedTypeSymbol>(NamedTypeEqualityComparer.Instance);
+            ProcessedInjections = new HashSet<INamedTypeSymbol>(NamedTypeEqualityComparer.Instance);
+            PropertiesToFieldsMapping = new Dictionary<IPropertySymbol, IFieldSymbol>(PropertySymbolEqualityComparer.Instance);
+            FieldsInvocations = new Dictionary<IFieldSymbol, List<IInvocationOperation>>(FieldSymbolEqualityComparer.Instance);
+            SyntaxTreeSemanticMapping = new Dictionary<SyntaxTree, SemanticModel>(SyntaxTreeEqualityComparer.Instance);
+            OwnCallsMapping = new Dictionary<IMethodSymbol, List<IInvocationOperation>>(MethodSymbolEqualityComparer.Instance);
+            InterfacesImplementations = new Dictionary<INamedTypeSymbol, List<INamedTypeSymbol>>(NamedTypeEqualityComparer.Instance);
+            DependencyRegistrationSearchersList = new List<IDependencyRegistrationsSearcher>();
+            DIRoots = new HashSet<INamedTypeSymbol>(NamedTypeEqualityComparer.Instance);
+            SymbolTree = new NamedTypeSymbolTree();
+        }
 
         public DependencyTreeAnalyzer(string solutionPath)
         {
             Microsoft.Build.Locator.MSBuildLocator.RegisterDefaults();
             Workspace = MSBuildWorkspace.Create();
 
-            Stopwatch stopwatch = new Stopwatch();
+            Stopwatch stopwatch = new();
             stopwatch.Start();
             Solution = Task.Run(() => Workspace.OpenSolutionAsync(solutionPath)).GetAwaiter().GetResult();
             stopwatch.Stop();
             TimeStampModel.SolutionBuildTime = stopwatch.ElapsedMilliseconds;
 
-            SymbolTree = new NamedTypeSymbolTree();
+            Init();
+
+            Workspace.RegisterWorkspaceChangedHandler(WorkspaceChangeHandler);
+        }
+
+        public DependencyTreeAnalyzer(Solution solution)
+        {
+            ReInit(solution);
+
+            Workspace.RegisterWorkspaceChangedHandler(WorkspaceChangeHandler);
+        }
+
+        public void ReInit(Solution newSolution)
+        {
+            Workspace = newSolution.Workspace as MSBuildWorkspace;
+            Solution = newSolution;
+
+            Init();
+            Workspace.RegisterWorkspaceChangedHandler(WorkspaceChangeHandler);
+        }
+
+        private async Task ReAnalyze(Solution solution)
+        {
+            ReInit(solution);
+
+            await Analyze();
         }
 
         public async Task Analyze()
@@ -68,9 +113,9 @@ namespace DomainAnalyze.DependencyTree.Services
             }
 
             foreach(var item in classes)
-                this.SolutionClasses.Add(item);
+                SolutionClasses.Add(item);
 
-            Stopwatch stopwatch = new Stopwatch();
+            Stopwatch stopwatch = new();
             stopwatch.Start();
             var binds = await GetNinjectRegistrations();
             foreach (var item in binds.Where(item => item.Implementation is not null))
@@ -83,19 +128,6 @@ namespace DomainAnalyze.DependencyTree.Services
             var list = GetNinjectInjections();
             stopwatch.Stop();
             TimeStampModel.DependenciesSearchTime = stopwatch.ElapsedMilliseconds;
-            //var distinctedDependencies = list
-            //    .Select(item => item.Type as INamedTypeSymbol)
-            //    .Distinct(NamedTypeEqualityComparer.Instance)
-            //    .Select(item => item as INamedTypeSymbol)
-            //    .ToList();
-
-            //var orderedList = list.OrderBy(item => item.Type.Name);
-
-            //List<(IFieldSymbol, DependencyRegistrationModel)> mapping = list
-            //    .Select(item => (item, 
-            //        binds.FirstOrDefault(bind => 
-            //        NamedTypeEqualityComparer.Instance.Equals(bind.Interface, item.Type as INamedTypeSymbol))))
-            //    .ToList();
 
             foreach (var fieldNode in SymbolTree.Fields)
             {
@@ -122,6 +154,22 @@ namespace DomainAnalyze.DependencyTree.Services
         }
 
         protected abstract Task InnerAnalyze();
+
+        protected virtual void WorkspaceChangeHandler(WorkspaceChangeEventArgs args)
+        {
+            lock (ChangedHadlerLocker)
+            {
+                ReAnalyze(args.NewSolution).GetAwaiter().GetResult();
+
+                foreach (var projectChange in args.NewSolution.GetChanges(args.OldSolution).GetProjectChanges())
+                {
+                    foreach (var doc in projectChange.GetChangedDocuments())
+                    {
+                        var document = projectChange.NewProject.GetDocument(doc);
+                    }
+                }
+            }
+        }
 
         private List<IFieldSymbol> BuildDependenciesList(INamedTypeSymbol type)
         {
@@ -323,7 +371,7 @@ namespace DomainAnalyze.DependencyTree.Services
                     if (!method.DeclaringSyntaxReferences.Any())
                         continue;
 
-                    this.SyntaxTreeSemanticMapping.TryGetValue(method.DeclaringSyntaxReferences.FirstOrDefault().SyntaxTree, out var semanticModel);
+                    SyntaxTreeSemanticMapping.TryGetValue(method.DeclaringSyntaxReferences.FirstOrDefault().SyntaxTree, out var semanticModel);
                     var methodBody = method.GetMethodBodyOperation(semanticModel);
 
                     var propertiesRefInvocations = methodBody
@@ -406,7 +454,7 @@ namespace DomainAnalyze.DependencyTree.Services
                 if (!method.DeclaringSyntaxReferences.Any())
                     continue;
 
-                this.SyntaxTreeSemanticMapping.TryGetValue(method.DeclaringSyntaxReferences.FirstOrDefault().SyntaxTree, out var semanticModel);
+                SyntaxTreeSemanticMapping.TryGetValue(method.DeclaringSyntaxReferences.FirstOrDefault().SyntaxTree, out var semanticModel);
 
                 var allInvocations = method.GetMethodBodyOperation(semanticModel)
                     .Descendants()
@@ -430,13 +478,13 @@ namespace DomainAnalyze.DependencyTree.Services
 
         private async Task BuildSyntaxTreeSemanticModelMapping()
         {
-            foreach (var project in this.Solution.Projects)
+            foreach (var project in Solution.Projects)
             {
                 var compilation = await project.GetCompilationAsync();
                 foreach (var doc in project.Documents)
                 {
                     var syntaxTree = await doc.GetSyntaxTreeAsync();
-                    this.SyntaxTreeSemanticMapping.TryAdd(syntaxTree, compilation.GetSemanticModel(syntaxTree));
+                    SyntaxTreeSemanticMapping.TryAdd(syntaxTree, compilation.GetSemanticModel(syntaxTree));
                 }
             }
         }
