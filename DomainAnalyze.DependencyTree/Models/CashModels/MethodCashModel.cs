@@ -11,6 +11,7 @@ namespace DomainAnalyze.DependencyTree.Models.CashModels
 {
     internal class MethodCashModel
     {
+        public int Generation { get; private set; }
         private IMethodSymbol _innerSymbol;
 
         public string MethodName { get; set; }
@@ -25,6 +26,11 @@ namespace DomainAnalyze.DependencyTree.Models.CashModels
         }
         public List<IInvocationOperation> MethodInvocations { get; set; } = [];
         public NamedTypeCashModel ContainingType { get; set; }
+
+        public void UpGeneration()
+        {
+            Generation++;
+        }
 
         public override bool Equals(object obj)
         {

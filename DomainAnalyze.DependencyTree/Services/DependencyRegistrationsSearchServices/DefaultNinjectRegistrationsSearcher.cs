@@ -41,7 +41,7 @@ namespace DomainAnalyze.DependencyTree.Services.DependencyRegistrationsSearchSer
                     var symbol = semanticModel.GetSymbolInfo(item).Symbol;
                     if (symbol is null)
                         return false;
-                    symbol.GetDo
+
                     return symbol.Name == "Bind" && symbol.ContainingType.Name == "BindingRoot" && symbol.ContainingType.ContainingNamespace.Name == "Syntax";
                 });
 

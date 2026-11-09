@@ -12,19 +12,26 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using System.Reflection.Metadata;
 using System.Runtime.Intrinsics.Arm;
 using System.Text;
 using System.Threading.Tasks;
+using static System.Net.Mime.MediaTypeNames;
 
 namespace DomainAnalyze.DependencyTree.Services
 {
     public abstract class DependencyTreeAnalyzer
     {
+        public Solution Solution { get; private set; }
         public TimeStampModel TimeStampModel { get; private set; }
+
+        public DependencyAnalyzerOptions AnalyzerOptions { get; private set; } = new DependencyAnalyzerOptions();
+        private FileSystemWatcher FileSystemWatcher;
         private Stopwatch Stopwatch = new Stopwatch();
         private Stack<INamedTypeSymbol> DependencyStack;
+
+        protected string SolutionPath;
         protected MSBuildWorkspace Workspace { get; private set; }
-        protected Solution Solution { get; private set; }
         protected HashSet<INamedTypeSymbol> SolutionClasses;
         protected HashSet<INamedTypeSymbol> DIImplementations;
 
@@ -43,7 +50,8 @@ namespace DomainAnalyze.DependencyTree.Services
         private List<IDependencyRegistrationsSearcher> DependencyRegistrationSearchersList;
         protected HashSet<INamedTypeSymbol> DIRoots;
 
-        private object ChangedHadlerLocker = new object;
+        private object ChangedHadlerLocker = new object();
+        private SolutionFilesWatcher SolutionFilesWatcher;
 
         private void Init()
         {
@@ -61,11 +69,22 @@ namespace DomainAnalyze.DependencyTree.Services
             DependencyRegistrationSearchersList = new List<IDependencyRegistrationsSearcher>();
             DIRoots = new HashSet<INamedTypeSymbol>(NamedTypeEqualityComparer.Instance);
             SymbolTree = new NamedTypeSymbolTree();
+            SolutionFilesWatcher = new SolutionFilesWatcher(Solution);
+
+            if (AnalyzerOptions.UseFileWatcher)
+                SolutionFilesWatcher.AddFileWatcher();
+        }
+
+        static DependencyTreeAnalyzer()
+        {
+            Microsoft.Build.Locator.MSBuildLocator.RegisterDefaults();
         }
 
         public DependencyTreeAnalyzer(string solutionPath)
         {
-            Microsoft.Build.Locator.MSBuildLocator.RegisterDefaults();
+            SolutionPath = solutionPath;
+            Init();
+
             Workspace = MSBuildWorkspace.Create();
 
             Stopwatch stopwatch = new();
@@ -73,8 +92,6 @@ namespace DomainAnalyze.DependencyTree.Services
             Solution = Task.Run(() => Workspace.OpenSolutionAsync(solutionPath)).GetAwaiter().GetResult();
             stopwatch.Stop();
             TimeStampModel.SolutionBuildTime = stopwatch.ElapsedMilliseconds;
-
-            Init();
 
             Workspace.RegisterWorkspaceChangedHandler(WorkspaceChangeHandler);
         }
@@ -90,8 +107,12 @@ namespace DomainAnalyze.DependencyTree.Services
         {
             Workspace = newSolution.Workspace as MSBuildWorkspace;
             Solution = newSolution;
+            SolutionPath = Solution.FilePath;
 
             Init();
+
+            //Workspace.OnDocumentTextChanged +=
+
             Workspace.RegisterWorkspaceChangedHandler(WorkspaceChangeHandler);
         }
 

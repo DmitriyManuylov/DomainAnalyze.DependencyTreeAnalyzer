@@ -20,6 +20,11 @@ namespace DomainAnalyze.DependencyTree.Models.CashModels
         [JsonIgnore]
         public Compilation Compilation { get; set; }
 
+        public void UpGeneration()
+        {
+            Generation++;
+        }
+
         public override bool Equals(object obj)
         {
             if (obj == null)

@@ -21,6 +21,11 @@ namespace DomainAnalyze.DependencyTree.Models.CashModels
         public HashSet<MethodCashModel> MethodList { get; set; } = [];
         public CompilationCashModel CompilationModel { get; set; }
 
+        public void UpGeneration()
+        {
+            Generation++;
+        }
+
         [JsonIgnore]
         public INamedTypeSymbol InnerSymbol
         {
