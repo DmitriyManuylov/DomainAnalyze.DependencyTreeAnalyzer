@@ -1,4 +1,5 @@
-﻿using DomainAnalyze.DependencyTree.Services;
+﻿using DomainAnalyze.DependencyTree.Models;
+using DomainAnalyze.DependencyTree.Services;
 using DomainAnalyze.DependencyTree.Services.DependencyRegistrationsSearchServices;
 using System.Configuration;
 
@@ -9,22 +10,34 @@ namespace Test
         static async Task Main(string[] args)
         {
             var solutionPath = ConfigurationManager.AppSettings.Get("SolutionPath");
-            var an = new An(solutionPath);
+
+            var options = new DomainAnalyze.DependencyTree.Models.DependencyAnalyzerOptions
+            {
+                UseFileWatcher = true,
+            };
+
+            var an = new An(solutionPath, options);
 
             an.SetDependencyRegistrationsSearcher<DefaultNinjectRegistrationsSearcher>();
             await an.Analyze();
+
+            while (true)
+            {
+                await Task.Delay(10000);
+            }
         }
     }
 
     public class An : DependencyTreeAnalyzer
     {
-        public An(string solutionPath) : base(solutionPath)
+        public An(string solutionPath, DependencyAnalyzerOptions analyzerOptions) : base(solutionPath, analyzerOptions)
         {
+
         }
 
-        protected override Task InnerAnalyze()
+        protected override async Task InnerAnalyze()
         {
-            throw new NotImplementedException();
+            await Task.Yield();
         }
     }
 }

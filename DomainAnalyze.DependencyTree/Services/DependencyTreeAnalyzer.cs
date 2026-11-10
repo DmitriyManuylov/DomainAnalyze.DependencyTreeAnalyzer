@@ -5,6 +5,7 @@ using DomainAnalyze.DependencyTree.Utilities.EqualityComparers;
 using DomainAnalyze.DependencyTree.Utilities.Extensions;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.CodeAnalysis.Host.Mef;
 using Microsoft.CodeAnalysis.MSBuild;
 using Microsoft.CodeAnalysis.Operations;
 using Microsoft.Extensions.Logging;
@@ -15,6 +16,7 @@ using System.Linq;
 using System.Reflection.Metadata;
 using System.Runtime.Intrinsics.Arm;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using static System.Net.Mime.MediaTypeNames;
 
@@ -22,16 +24,18 @@ namespace DomainAnalyze.DependencyTree.Services
 {
     public abstract class DependencyTreeAnalyzer
     {
-        public Solution Solution { get; private set; }
+        private MefHostServices HostServices;
+        protected Workspace Workspace { get; private set; }
+        protected Solution Solution { get; private set; }
+
         public TimeStampModel TimeStampModel { get; private set; }
 
-        public DependencyAnalyzerOptions AnalyzerOptions { get; private set; } = new DependencyAnalyzerOptions();
+        public DependencyAnalyzerOptions AnalyzerOptions { get; set; }
         private FileSystemWatcher FileSystemWatcher;
         private Stopwatch Stopwatch = new Stopwatch();
         private Stack<INamedTypeSymbol> DependencyStack;
 
         protected string SolutionPath;
-        protected MSBuildWorkspace Workspace { get; private set; }
         protected HashSet<INamedTypeSymbol> SolutionClasses;
         protected HashSet<INamedTypeSymbol> DIImplementations;
 
@@ -50,11 +54,14 @@ namespace DomainAnalyze.DependencyTree.Services
         private List<IDependencyRegistrationsSearcher> DependencyRegistrationSearchersList;
         protected HashSet<INamedTypeSymbol> DIRoots;
 
+        private NodesCash NodesCash;
+
         private object ChangedHadlerLocker = new object();
         private SolutionFilesWatcher SolutionFilesWatcher;
 
         private void Init()
         {
+            AnalyzerOptions ??= new();
             TimeStampModel = new TimeStampModel();
             Stopwatch = new Stopwatch();
             DependencyStack = new Stack<INamedTypeSymbol>();
@@ -69,10 +76,6 @@ namespace DomainAnalyze.DependencyTree.Services
             DependencyRegistrationSearchersList = new List<IDependencyRegistrationsSearcher>();
             DIRoots = new HashSet<INamedTypeSymbol>(NamedTypeEqualityComparer.Instance);
             SymbolTree = new NamedTypeSymbolTree();
-            SolutionFilesWatcher = new SolutionFilesWatcher(Solution);
-
-            if (AnalyzerOptions.UseFileWatcher)
-                SolutionFilesWatcher.AddFileWatcher();
         }
 
         static DependencyTreeAnalyzer()
@@ -80,24 +83,45 @@ namespace DomainAnalyze.DependencyTree.Services
             Microsoft.Build.Locator.MSBuildLocator.RegisterDefaults();
         }
 
-        public DependencyTreeAnalyzer(string solutionPath)
+        public DependencyTreeAnalyzer(string solutionPath, DependencyAnalyzerOptions analyzerOptions = null)
         {
+            AnalyzerOptions = analyzerOptions;
             SolutionPath = solutionPath;
             Init();
 
-            Workspace = MSBuildWorkspace.Create();
+            HostServices ??= MefHostServices.Create(MefHostServices.DefaultAssemblies);
+            var msBuildWorkspace = MSBuildWorkspace.Create(HostServices);
 
             Stopwatch stopwatch = new();
             stopwatch.Start();
-            Solution = Task.Run(() => Workspace.OpenSolutionAsync(solutionPath)).GetAwaiter().GetResult();
+            var solution = Task.Run(() => msBuildWorkspace.OpenSolutionAsync(solutionPath)).GetAwaiter().GetResult();
             stopwatch.Stop();
             TimeStampModel.SolutionBuildTime = stopwatch.ElapsedMilliseconds;
+
+            if (AnalyzerOptions.UseFileWatcher)
+            {
+                var reloadableWorkspace = new ReloadableWorkspace(HostServices);
+
+                reloadableWorkspace.InitializeAsync(solution).GetAwaiter().GetResult();
+
+                SolutionFilesWatcher = new SolutionFilesWatcher(reloadableWorkspace, NodesCash);
+                SolutionFilesWatcher.AddFileWatcher();
+
+                Workspace = reloadableWorkspace;
+            }
+            else
+            {
+                Workspace = msBuildWorkspace;
+            }
+
+            Solution = Workspace.CurrentSolution;
 
             Workspace.RegisterWorkspaceChangedHandler(WorkspaceChangeHandler);
         }
 
-        public DependencyTreeAnalyzer(Solution solution)
+        public DependencyTreeAnalyzer(Solution solution, DependencyAnalyzerOptions analyzerOptions = null)
         {
+            AnalyzerOptions = analyzerOptions;
             ReInit(solution);
 
             Workspace.RegisterWorkspaceChangedHandler(WorkspaceChangeHandler);
@@ -105,18 +129,33 @@ namespace DomainAnalyze.DependencyTree.Services
 
         public void ReInit(Solution newSolution)
         {
-            Workspace = newSolution.Workspace as MSBuildWorkspace;
+            Workspace = newSolution.Workspace as ReloadableWorkspace;
+
+            if (Workspace is null && AnalyzerOptions.UseFileWatcher)
+            {
+                var reloadableWorkspace = new ReloadableWorkspace(HostServices);
+
+                reloadableWorkspace.InitializeAsync(newSolution).GetAwaiter().GetResult();
+
+                SolutionFilesWatcher = new SolutionFilesWatcher(reloadableWorkspace, NodesCash);
+                SolutionFilesWatcher.AddFileWatcher();
+
+                Workspace = reloadableWorkspace;
+            }
+            else
+            {
+                Workspace = newSolution.Workspace;
+            }
+            
             Solution = newSolution;
             SolutionPath = Solution.FilePath;
 
             Init();
 
-            //Workspace.OnDocumentTextChanged +=
-
             Workspace.RegisterWorkspaceChangedHandler(WorkspaceChangeHandler);
         }
 
-        private async Task ReAnalyze(Solution solution)
+        public async Task ReAnalyze(Solution solution)
         {
             ReInit(solution);
 
@@ -180,7 +219,7 @@ namespace DomainAnalyze.DependencyTree.Services
         {
             lock (ChangedHadlerLocker)
             {
-                ReAnalyze(args.NewSolution).GetAwaiter().GetResult();
+                //ReAnalyze(args.NewSolution).GetAwaiter().GetResult();
 
                 foreach (var projectChange in args.NewSolution.GetChanges(args.OldSolution).GetProjectChanges())
                 {
