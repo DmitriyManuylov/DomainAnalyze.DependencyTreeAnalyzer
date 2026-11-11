@@ -10,7 +10,7 @@ using System.Threading.Tasks;
 
 namespace DomainAnalyze.DependencyTree.Models.CashModels
 {
-    internal class NamedTypeCashModel
+    public class NamedTypeCashModel
     {
         private INamedTypeSymbol _innerSymbol;
         public int Generation { get; private set; }

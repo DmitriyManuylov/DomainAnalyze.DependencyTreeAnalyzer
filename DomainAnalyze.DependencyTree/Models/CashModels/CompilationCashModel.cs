@@ -8,7 +8,7 @@ using System.Threading.Tasks;
 
 namespace DomainAnalyze.DependencyTree.Models.CashModels
 {
-    internal class CompilationCashModel
+    public class CompilationCashModel
     {
         public int Generation { get; private set; }
         public HashSet<NamedTypeCashModel> NamedTypesList { get; set; } = [];

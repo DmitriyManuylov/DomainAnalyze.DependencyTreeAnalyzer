@@ -8,13 +8,14 @@ using System.Text;
 using System.Threading.Tasks;
 using DomainAnalyze.DependencyTree.Models;
 using DomainAnalyze.DependencyTree.Utilities.Extensions;
+using DomainAnalyze.DependencyTree.Models.CashModels;
 
 namespace DomainAnalyze.DependencyTree.Services.DependencyRegistrationsSearchServices
 {
     public class DefaultNinjectRegistrationsSearcher : IDependencyRegistrationsSearcher
     {
         public Solution Solution { get; init; }
-        public HashSet<INamedTypeSymbol> SolutionTypes { get; init; }
+        public DependenciesState DependenciesState { get; init; }
 
         public bool CheckType(INamedTypeSymbol type)
         {
@@ -92,8 +93,8 @@ namespace DomainAnalyze.DependencyTree.Services.DependencyRegistrationsSearchSer
 
                 dependencyRegistrations.Add(new DependencyRegistrationModel
                 {
-                    Interface = bindTypeSymbol,
-                    Implementation = toTypeSymbol,
+                    Interface = DependenciesState.GetNamedType(bindTypeSymbol) ?? new NamedTypeCashModel { InnerSymbol = bindTypeSymbol },
+                    Implementation = DependenciesState.GetNamedType(toTypeSymbol) ?? new NamedTypeCashModel { InnerSymbol = bindTypeSymbol },
                     IsSelfImplemented = isSelfImplemented,
                     OperationSyntaxNode = op.Syntax
                 });

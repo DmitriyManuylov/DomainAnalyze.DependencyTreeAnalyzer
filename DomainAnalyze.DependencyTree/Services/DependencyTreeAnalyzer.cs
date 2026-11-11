@@ -1,4 +1,5 @@
 ﻿using DomainAnalyze.DependencyTree.Models;
+using DomainAnalyze.DependencyTree.Models.CashModels;
 using DomainAnalyze.DependencyTree.Models.SymbolTreeModels;
 using DomainAnalyze.DependencyTree.Services.DependencyRegistrationsSearchServices;
 using DomainAnalyze.DependencyTree.Utilities.EqualityComparers;
@@ -18,6 +19,7 @@ using System.Runtime.Intrinsics.Arm;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using static Microsoft.CodeAnalysis.CSharp.SyntaxTokenParser;
 using static System.Net.Mime.MediaTypeNames;
 
 namespace DomainAnalyze.DependencyTree.Services
@@ -33,13 +35,13 @@ namespace DomainAnalyze.DependencyTree.Services
         public DependencyAnalyzerOptions AnalyzerOptions { get; set; }
         private FileSystemWatcher FileSystemWatcher;
         private Stopwatch Stopwatch = new Stopwatch();
-        private Stack<INamedTypeSymbol> DependencyStack;
+        private Stack<NamedTypeCashModel> DependencyStack;
 
         protected string SolutionPath;
-        protected HashSet<INamedTypeSymbol> SolutionClasses;
-        protected HashSet<INamedTypeSymbol> DIImplementations;
+        protected HashSet<NamedTypeCashModel> SolutionClasses;
+        protected HashSet<NamedTypeCashModel> DIImplementations;
 
-        private HashSet<INamedTypeSymbol> ProcessedInjections;
+        private HashSet<NamedTypeCashModel> ProcessedInjections;
         protected NamedTypeSymbolTree SymbolTree { get; private set; }
         protected Dictionary<IPropertySymbol, IFieldSymbol> PropertiesToFieldsMapping;
         protected Dictionary<IFieldSymbol, List<IInvocationOperation>> FieldsInvocations;
@@ -50,11 +52,11 @@ namespace DomainAnalyze.DependencyTree.Services
         /// </summary>
         protected Dictionary<IMethodSymbol, List<IInvocationOperation>> OwnCallsMapping;
 
-        protected Dictionary<INamedTypeSymbol, List<INamedTypeSymbol>> InterfacesImplementations;
+        protected Dictionary<NamedTypeCashModel, List<NamedTypeCashModel>> InterfacesImplementations;
         private List<IDependencyRegistrationsSearcher> DependencyRegistrationSearchersList;
-        protected HashSet<INamedTypeSymbol> DIRoots;
+        protected HashSet<NamedTypeCashModel> DIRoots;
 
-        private NodesCash NodesCash;
+        private DependenciesState DependenciesState;
 
         private object ChangedHadlerLocker = new object();
         private SolutionFilesWatcher SolutionFilesWatcher;
@@ -64,18 +66,19 @@ namespace DomainAnalyze.DependencyTree.Services
             AnalyzerOptions ??= new();
             TimeStampModel = new TimeStampModel();
             Stopwatch = new Stopwatch();
-            DependencyStack = new Stack<INamedTypeSymbol>();
-            SolutionClasses = new HashSet<INamedTypeSymbol>(NamedTypeEqualityComparer.Instance);
-            DIImplementations = new HashSet<INamedTypeSymbol>(NamedTypeEqualityComparer.Instance);
-            ProcessedInjections = new HashSet<INamedTypeSymbol>(NamedTypeEqualityComparer.Instance);
+            DependencyStack = new Stack<NamedTypeCashModel>();
+            SolutionClasses = new HashSet<NamedTypeCashModel>();
+            DIImplementations = new HashSet<NamedTypeCashModel>();
+            ProcessedInjections = new HashSet<NamedTypeCashModel>();
             PropertiesToFieldsMapping = new Dictionary<IPropertySymbol, IFieldSymbol>(PropertySymbolEqualityComparer.Instance);
             FieldsInvocations = new Dictionary<IFieldSymbol, List<IInvocationOperation>>(FieldSymbolEqualityComparer.Instance);
             SyntaxTreeSemanticMapping = new Dictionary<SyntaxTree, SemanticModel>(SyntaxTreeEqualityComparer.Instance);
             OwnCallsMapping = new Dictionary<IMethodSymbol, List<IInvocationOperation>>(MethodSymbolEqualityComparer.Instance);
-            InterfacesImplementations = new Dictionary<INamedTypeSymbol, List<INamedTypeSymbol>>(NamedTypeEqualityComparer.Instance);
+            InterfacesImplementations = new Dictionary<NamedTypeCashModel, List<NamedTypeCashModel>>();
             DependencyRegistrationSearchersList = new List<IDependencyRegistrationsSearcher>();
-            DIRoots = new HashSet<INamedTypeSymbol>(NamedTypeEqualityComparer.Instance);
+            DIRoots = new HashSet<NamedTypeCashModel>();
             SymbolTree = new NamedTypeSymbolTree();
+            DependenciesState = new DependenciesState();
         }
 
         static DependencyTreeAnalyzer()
@@ -104,7 +107,7 @@ namespace DomainAnalyze.DependencyTree.Services
 
                 reloadableWorkspace.InitializeAsync(solution).GetAwaiter().GetResult();
 
-                SolutionFilesWatcher = new SolutionFilesWatcher(reloadableWorkspace, NodesCash);
+                SolutionFilesWatcher = new SolutionFilesWatcher(reloadableWorkspace, DependenciesState);
                 SolutionFilesWatcher.AddFileWatcher();
 
                 Workspace = reloadableWorkspace;
@@ -137,7 +140,7 @@ namespace DomainAnalyze.DependencyTree.Services
 
                 reloadableWorkspace.InitializeAsync(newSolution).GetAwaiter().GetResult();
 
-                SolutionFilesWatcher = new SolutionFilesWatcher(reloadableWorkspace, NodesCash);
+                SolutionFilesWatcher = new SolutionFilesWatcher(reloadableWorkspace, DependenciesState);
                 SolutionFilesWatcher.AddFileWatcher();
 
                 Workspace = reloadableWorkspace;
@@ -169,11 +172,8 @@ namespace DomainAnalyze.DependencyTree.Services
             List<INamedTypeSymbol> classes = new();
             foreach (var project in Solution.Projects)
             {
-                classes.AddRange(await project.GetProjectTypes());
+                await GetProjectClasses(project);
             }
-
-            foreach(var item in classes)
-                SolutionClasses.Add(item);
 
             Stopwatch stopwatch = new();
             stopwatch.Start();
@@ -213,6 +213,40 @@ namespace DomainAnalyze.DependencyTree.Services
             TimeStampModel.AnalyzeTime = stopwatch.ElapsedMilliseconds;
         }
 
+        private async Task GetProjectClasses(Project project)
+        {
+            var compilation = await project.GetCompilationAsync();
+
+            foreach (var doc in project.Documents)
+            {
+                var syntaxTree = await doc.GetSyntaxTreeAsync();
+
+                var root = await syntaxTree!.GetRootAsync();
+
+                var semanticModel = compilation!.GetSemanticModel(syntaxTree);
+
+                var types = root.DescendantNodes()
+                    .OfType<ClassDeclarationSyntax>();
+
+                var interfaces = root.DescendantNodes()
+                    .OfType<InterfaceDeclarationSyntax>();
+
+                var symbols = types.Select(item => semanticModel.GetDeclaredSymbol(item) as INamedTypeSymbol);
+
+                var interfaceSymbols = interfaces.Select(item => semanticModel.GetDeclaredSymbol(item) as INamedTypeSymbol);
+
+                foreach (var symbol in symbols)
+                {
+                    DependenciesState.AddOrGetNamedType(project, semanticModel, doc, symbol);
+                }
+
+                foreach (var symbol in interfaceSymbols)
+                {
+                    DependenciesState.AddOrGetNamedType(project, semanticModel, doc, symbol);
+                }
+            }
+        }
+
         protected abstract Task InnerAnalyze();
 
         protected virtual void WorkspaceChangeHandler(WorkspaceChangeEventArgs args)
@@ -231,7 +265,7 @@ namespace DomainAnalyze.DependencyTree.Services
             }
         }
 
-        private List<IFieldSymbol> BuildDependenciesList(INamedTypeSymbol type)
+        private List<IFieldSymbol> BuildDependenciesList(NamedTypeCashModel type)
         {
             if (ProcessedInjections.Contains(type))
                 return new List<IFieldSymbol>();
@@ -251,15 +285,18 @@ namespace DomainAnalyze.DependencyTree.Services
 
             foreach (var dep in deps)
             {
-                List<INamedTypeSymbol> implementations = new List<INamedTypeSymbol>();
+                List<NamedTypeCashModel> implementations = new List<NamedTypeCashModel>();
+                var node = DependenciesState.GetNamedType(dep.Type as INamedTypeSymbol);
+                if (node is null)
+                    continue;
 
                 if (dep.Type.TypeKind == TypeKind.Interface)
                 {
-                    implementations.AddRange(FindInterfaceImplementation(dep.Type as INamedTypeSymbol));
+                    implementations.AddRange(FindInterfaceImplementation(node));
                 }
                 else
                 {
-                    implementations.Add(dep.Type as INamedTypeSymbol);
+                    implementations.Add(node);
                 }
 
                 if (implementations is null || !implementations.Any())
@@ -269,7 +306,7 @@ namespace DomainAnalyze.DependencyTree.Services
                 {
                     currentTreeNode.AddChildrenNode(dep, implement);
 
-                    if (DependencyStack.Contains(implement, NamedTypeEqualityComparer.Instance))
+                    if (DependencyStack.Contains(implement))
                         continue;
 
                     var innerDeps = BuildDependenciesList(implement);
@@ -311,9 +348,9 @@ namespace DomainAnalyze.DependencyTree.Services
             return injectedDeps;
         }
 
-        private List<IFieldSymbol> FindTypeDependencies(INamedTypeSymbol type)
+        private List<IFieldSymbol> FindTypeDependencies(NamedTypeCashModel type)
         {
-            var typeFields = type.GetMembers().OfType<IFieldSymbol>();
+            var typeFields = type.InnerSymbol.GetMembers().OfType<IFieldSymbol>();
             var fieldsInjectedByAttributes = typeFields
                 .Where(
                     item =>
@@ -321,7 +358,7 @@ namespace DomainAnalyze.DependencyTree.Services
                     .GetAttributes()
                     .Any(item => item.AttributeClass?.Name?.Contains("Inject") == true) == true) ?? [];
 
-            var constructor = type.Constructors.FirstOrDefault(item => item.Parameters.Count() > 0);
+            var constructor = type.InnerSymbol.Constructors.FirstOrDefault(item => item.Parameters.Count() > 0);
 
             IEnumerable<AssignmentExpressionSyntax> injectingAssignmentsInConstructor = new List<AssignmentExpressionSyntax>();
             if (constructor is not null)
@@ -371,26 +408,26 @@ namespace DomainAnalyze.DependencyTree.Services
             return result;
         }
 
-        private List<INamedTypeSymbol> FindInterfaceImplementation(INamedTypeSymbol interfaceType)
+        private List<NamedTypeCashModel> FindInterfaceImplementation(NamedTypeCashModel interfaceType)
         {
-            List<INamedTypeSymbol> result = new();
+            List<NamedTypeCashModel> result = new();
 
-            if (interfaceType.TypeKind != TypeKind.Interface)
+            if (interfaceType.InnerSymbol.TypeKind != TypeKind.Interface)
             {
                 throw new InvalidOperationException();
             }
 
-            result = SolutionClasses.Where(item => item.Interfaces.Any(item => NamedTypeEqualityComparer.Instance.Equals(item, interfaceType))).ToList();
+            result = DependenciesState.NamedTypeEnumerable.Where(item => item.InnerSymbol.Interfaces.Any(item => NamedTypeEqualityComparer.Instance.Equals(item, interfaceType.InnerSymbol))).ToList();
 
             InterfacesImplementations.TryAdd(interfaceType, result);
 
             return result;
         }
 
-        private List<INamedTypeSymbol> GetControllers()
+        private List<NamedTypeCashModel> GetControllers()
         {
-            var controllers = SolutionClasses.Where(item =>
-                item.Name.Contains("Controller") && item.BaseType.Name.Contains("Controller"));
+            var controllers = DependenciesState.NamedTypeEnumerable.Where(item =>
+                item.Name.Contains("Controller") && item.InnerSymbol.BaseType.Name.Contains("Controller"));
 
             return controllers.ToList();
         }
@@ -399,14 +436,14 @@ namespace DomainAnalyze.DependencyTree.Services
         {
             List<DependencyRegistrationModel> dependencyRegistrations = new();
 
-            foreach (var type in SolutionClasses)
+            foreach (var type in DependenciesState.NamedTypeEnumerable.Where(item => item.InnerSymbol.TypeKind == TypeKind.Class))
             {
                 foreach(var searcher in DependencyRegistrationSearchersList)
                 {
-                    if (!searcher.CheckType(type))
+                    if (!searcher.CheckType(type.InnerSymbol))
                         continue;
 
-                    dependencyRegistrations.AddRange(await searcher.SearchRegistrations(type));
+                    dependencyRegistrations.AddRange(await searcher.SearchRegistrations(type.InnerSymbol));
                 }
             }
 
@@ -417,12 +454,13 @@ namespace DomainAnalyze.DependencyTree.Services
         {
             foreach (var field in SymbolTree.Fields)
             {
-                if (field.ContainingTypeNode.Symbol.TypeKind == TypeKind.Interface)
+                if (field.ContainingTypeNode.Symbol.InnerSymbol.TypeKind == TypeKind.Interface)
                     continue;
 
                 var methods = field
                     .ContainingTypeNode
                     .Symbol
+                    .InnerSymbol
                     .GetMembers()
                     .OfType<IMethodSymbol>();
 
@@ -442,7 +480,8 @@ namespace DomainAnalyze.DependencyTree.Services
                         if (item.Property.Type is not INamedTypeSymbol propType)
                             return false;
 
-                        if (!InterfacesImplementations.ContainsKey(propType))
+                        var node = DependenciesState.GetNamedType(propType);
+                        if (node is null || !InterfacesImplementations.ContainsKey(node))
                             return false;
 
                         if (!PropertiesToFieldsMapping.TryGetValue(item.Property, out var outField) || (outField is null))
@@ -496,16 +535,16 @@ namespace DomainAnalyze.DependencyTree.Services
 
             foreach (var dep in DIImplementations)
             {
-                if (dep.TypeKind == TypeKind.Interface)
+                if (dep.InnerSymbol.TypeKind == TypeKind.Interface)
                     continue;
 
                 await TypeOwnMethodInvocations(dep);
             }
         }
 
-        private async Task TypeOwnMethodInvocations(INamedTypeSymbol dep)
+        private async Task TypeOwnMethodInvocations(NamedTypeCashModel dep)
         {
-            var methods = dep
+            var methods = dep.InnerSymbol
                 .GetMembers()
                 .OfType<IMethodSymbol>();
 
@@ -519,7 +558,7 @@ namespace DomainAnalyze.DependencyTree.Services
                 var allInvocations = method.GetMethodBodyOperation(semanticModel)
                     .Descendants()
                     .OfType<IInvocationOperation>()
-                    .Where(invocation => NamedTypeEqualityComparer.Instance.Equals(dep, invocation.TargetMethod.ContainingType));
+                    .Where(invocation => NamedTypeEqualityComparer.Instance.Equals(dep.InnerSymbol, invocation.TargetMethod.ContainingType));
 
                 foreach (var invocation in allInvocations)
                 {
@@ -554,7 +593,7 @@ namespace DomainAnalyze.DependencyTree.Services
             var instance = new TType()
             {
                 Solution = Solution,
-                SolutionTypes = SolutionClasses
+                DependenciesState = DependenciesState,
             };
 
             DependencyRegistrationSearchersList.Add(instance);

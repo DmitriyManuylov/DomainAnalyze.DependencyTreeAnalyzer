@@ -21,13 +21,13 @@ namespace DomainAnalyze.DependencyTree.Services
         private ReloadableWorkspace Workspace;
         private FileSystemWatcher FileSystemWatcher;
         private SemaphoreSlim locker = new(1, 1);
-        private NodesCash NodesCash;
+        private DependenciesState DependenciesState;
 
         ConcurrentQueue<FileChangeModel> FilesQueue = new();
 
-        public SolutionFilesWatcher(ReloadableWorkspace workspace, NodesCash nodesCash)
+        public SolutionFilesWatcher(ReloadableWorkspace workspace, DependenciesState dependenciesState)
         {
-            NodesCash = nodesCash;
+            DependenciesState = dependenciesState;
             Workspace = workspace;
         }
 
@@ -97,8 +97,6 @@ namespace DomainAnalyze.DependencyTree.Services
 
                             files.Add(file);
                         }
-
-
 
                         foreach (var project in files.GroupBy(file => file.Project))
                         {
@@ -204,9 +202,12 @@ namespace DomainAnalyze.DependencyTree.Services
             var normalizedPath = SolutionInfoFactory.NormalizePath(projectPath);
 
             var existingProject = currentSolution.Projects
-                .First(p =>
+                .FirstOrDefault(p =>
                     p.FilePath != null &&
                     SolutionInfoFactory.NormalizePath(p.FilePath) == normalizedPath);
+
+            if (existingProject is null)
+                return;
 
             using var loader = MSBuildWorkspace.Create();
 

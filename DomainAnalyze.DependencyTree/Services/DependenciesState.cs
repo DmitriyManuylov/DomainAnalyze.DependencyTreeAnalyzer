@@ -8,12 +8,23 @@ using System.Threading.Tasks;
 
 namespace DomainAnalyze.DependencyTree.Services
 {
-    internal class NodesCash
+    public class DependenciesState
     {
+        private int Generation;
         private HashSet<CompilationCashModel> CompilationCashModelList { get; set; } = [];
         private HashSet<DocumentCashModel> SyntaxTriesPlainList { get; set; } = [];
         private HashSet<NamedTypeCashModel> NamedTypesPlainList { get; set; } = [];
         private HashSet<MethodCashModel> MethodsPlainList { get; set; } = [];
+
+        public IEnumerable<NamedTypeCashModel> NamedTypeEnumerable => NamedTypesPlainList;
+
+        public NamedTypeCashModel GetNamedType(INamedTypeSymbol namedTypeSymbol)
+        {
+            return NamedTypesPlainList.TryGetValue(new NamedTypeCashModel
+            {
+                InnerSymbol = namedTypeSymbol,
+            }, out var namedTypeModel) ? namedTypeModel : null;
+        }
 
         public DocumentCashModel GetDocument(string filePath)
         {
@@ -25,9 +36,9 @@ namespace DomainAnalyze.DependencyTree.Services
             return actualValue;
         }
 
-        public MethodCashModel AddOrGetMethod(SemanticModel semanticModel, Document document, IMethodSymbol methodSymbol, bool rewrite = false)
+        public MethodCashModel AddOrGetMethod(Project project, SemanticModel semanticModel, Document document, IMethodSymbol methodSymbol, bool rewrite = false)
         {
-            var type = AddOrGetNamedType(semanticModel, document, methodSymbol.ContainingType);
+            var type = AddOrGetNamedType(project, semanticModel, document, methodSymbol.ContainingType, rewrite);
 
             var methodModel = new MethodCashModel
             {
@@ -54,15 +65,14 @@ namespace DomainAnalyze.DependencyTree.Services
             return methodModel;
         }
 
-        public NamedTypeCashModel AddOrGetNamedType(SemanticModel semanticModel, Document document, INamedTypeSymbol namedTypeSymbol, bool rewrite = false)
+        public NamedTypeCashModel AddOrGetNamedType(Project project, SemanticModel semanticModel, Document document, INamedTypeSymbol namedTypeSymbol, bool rewrite = false)
         {
-            var compilation = AddOrGetCompilation(semanticModel, document);
-            var syntaxTree = AddOrGetSyntaxTree(semanticModel, document);
+            var syntaxTree = AddOrGetSyntaxTree(project, semanticModel, document);
 
             var namedTypeCashModel = new NamedTypeCashModel
             {
                 InnerSymbol = namedTypeSymbol,
-                CompilationModel = compilation,
+                CompilationModel = syntaxTree.CompilationModel,
             };
 
             if (NamedTypesPlainList.TryGetValue(namedTypeCashModel, out var existed))
@@ -81,16 +91,17 @@ namespace DomainAnalyze.DependencyTree.Services
 
             syntaxTree.NamedTypeList.Add(namedTypeCashModel);
 
-            compilation.NamedTypesList.Add(namedTypeCashModel);
+            syntaxTree.CompilationModel.NamedTypesList.Add(namedTypeCashModel);
 
             return namedTypeCashModel;
         }
 
-        private CompilationCashModel AddOrGetCompilation(SemanticModel semanticModel, Document document, bool rewrite = false)
+        private CompilationCashModel AddOrGetCompilation(Project project, SemanticModel semanticModel, Document document, bool rewrite = false)
         {
             CompilationCashModel compilation = new()
             {
-                Compilation = semanticModel.Compilation
+                Compilation = semanticModel.Compilation,
+                Project = project,
             };
 
             if (CompilationCashModelList.TryGetValue(compilation, out var existedCompilation))
@@ -106,9 +117,9 @@ namespace DomainAnalyze.DependencyTree.Services
             return compilation;
         }
 
-        private DocumentCashModel AddOrGetSyntaxTree(SemanticModel semanticModel, Document document, bool rewrite = false)
+        private DocumentCashModel AddOrGetSyntaxTree(Project project, SemanticModel semanticModel, Document document, bool rewrite = false)
         {
-            var compilation = AddOrGetCompilation(semanticModel, document);
+            var compilation = AddOrGetCompilation(project, semanticModel, document);
 
             var syntaxTreeModel = new DocumentCashModel()
             {

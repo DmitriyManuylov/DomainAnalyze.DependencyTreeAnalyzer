@@ -8,7 +8,7 @@ using System.Threading.Tasks;
 
 namespace DomainAnalyze.DependencyTree.Models.CashModels
 {
-    internal class DocumentCashModel
+    public class DocumentCashModel
     {
         private string filePath;
         private SyntaxTree syntaxTree;
@@ -30,7 +30,7 @@ namespace DomainAnalyze.DependencyTree.Models.CashModels
             get { return syntaxTree; }
             set
             {
-                SyntaxTree = value;
+                syntaxTree = value;
                 FilePath = value.FilePath;
             }
         }

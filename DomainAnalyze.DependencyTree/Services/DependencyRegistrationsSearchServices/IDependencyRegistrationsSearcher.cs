@@ -1,4 +1,5 @@
 ﻿using DomainAnalyze.DependencyTree.Models;
+using DomainAnalyze.DependencyTree.Models.CashModels;
 using Microsoft.CodeAnalysis;
 using System;
 using System.Collections.Generic;
@@ -14,7 +15,7 @@ namespace DomainAnalyze.DependencyTree.Services.DependencyRegistrationsSearchSer
     public interface IDependencyRegistrationsSearcher
     {
         Solution Solution { get; init; }
-        HashSet<INamedTypeSymbol> SolutionTypes { get; init; }
+        DependenciesState DependenciesState { get; init; }
         /// <summary>
         /// Проверка соответствия типа условиям применимости
         /// </summary>

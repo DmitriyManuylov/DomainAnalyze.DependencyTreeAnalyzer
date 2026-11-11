@@ -1,4 +1,5 @@
-﻿using Microsoft.CodeAnalysis;
+﻿using DomainAnalyze.DependencyTree.Models.CashModels;
+using Microsoft.CodeAnalysis;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -12,7 +13,7 @@ namespace DomainAnalyze.DependencyTree.Models.SymbolTreeModels
         public HashSet<NamedTypeSymbolTreeNode> Roots { get; private set; } = new HashSet<NamedTypeSymbolTreeNode>();
         public HashSet<NamedTypeSymbolTreeNode> Nodes { get; private set; } = new HashSet<NamedTypeSymbolTreeNode>();
         public HashSet<FieldSymbolSubnode> Fields { get; private set; } = new HashSet<FieldSymbolSubnode>();
-        public NamedTypeSymbolTreeNode AddRoot(INamedTypeSymbol rootSymbol)
+        public NamedTypeSymbolTreeNode AddRoot(NamedTypeCashModel rootSymbol)
         {
             var root = new NamedTypeSymbolTreeNode()
             {
@@ -35,7 +36,7 @@ namespace DomainAnalyze.DependencyTree.Models.SymbolTreeModels
             return root;
         }
 
-        public NamedTypeSymbolTreeNode FindNode(INamedTypeSymbol symbol)
+        public NamedTypeSymbolTreeNode FindNode(NamedTypeCashModel symbol)
         {
             var node = new NamedTypeSymbolTreeNode { Symbol = symbol };
 

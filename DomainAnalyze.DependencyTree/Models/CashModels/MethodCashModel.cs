@@ -9,7 +9,7 @@ using System.Threading.Tasks;
 
 namespace DomainAnalyze.DependencyTree.Models.CashModels
 {
-    internal class MethodCashModel
+    public class MethodCashModel
     {
         public int Generation { get; private set; }
         private IMethodSymbol _innerSymbol;

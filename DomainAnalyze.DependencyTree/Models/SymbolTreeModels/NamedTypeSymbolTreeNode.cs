@@ -1,4 +1,5 @@
-﻿using DomainAnalyze.DependencyTree.Utilities.Extensions;
+﻿using DomainAnalyze.DependencyTree.Models.CashModels;
+using DomainAnalyze.DependencyTree.Utilities.Extensions;
 using Microsoft.CodeAnalysis;
 using System;
 using System.Collections.Generic;
@@ -15,9 +16,9 @@ namespace DomainAnalyze.DependencyTree.Models.SymbolTreeModels
         //public HashSet<NamedTypeSymbolTreeNode> Roots { get; set; } = new HashSet<NamedTypeSymbolTreeNode>();
         public List<FieldSymbolSubnode> ParentList { get; set; } = new List<FieldSymbolSubnode>();
         public List<FieldSymbolSubnode> ChildrenList { get; set; } = new List<FieldSymbolSubnode>();
-        public INamedTypeSymbol Symbol { get; set; }
+        public NamedTypeCashModel Symbol { get; set; }
 
-        public NamedTypeSymbolTreeNode AddChildrenNode(IFieldSymbol fieldSymbol, INamedTypeSymbol implementation)
+        public NamedTypeSymbolTreeNode AddChildrenNode(IFieldSymbol fieldSymbol, NamedTypeCashModel implementation)
         {
 
             var childNode = new NamedTypeSymbolTreeNode()
@@ -56,7 +57,7 @@ namespace DomainAnalyze.DependencyTree.Models.SymbolTreeModels
 
         public override int GetHashCode()
         {
-            return HashCode.Combine(this.Symbol.Name, this.Symbol.ContainingNamespace.NamespaceFullName());
+            return HashCode.Combine(this.Symbol.Name, this.Symbol.InnerSymbol.ContainingNamespace.NamespaceFullName());
         }
         public override bool Equals(object symbol)
         {
@@ -66,7 +67,7 @@ namespace DomainAnalyze.DependencyTree.Models.SymbolTreeModels
             if (node.Symbol is null)
                 return false;
 
-            return this.Symbol.Name == node.Symbol.Name && this.Symbol.ContainingNamespace.NamespaceFullName() == node.Symbol.ContainingNamespace.NamespaceFullName();
+            return this.Symbol.Name == node.Symbol.Name && this.Symbol.InnerSymbol.ContainingNamespace.NamespaceFullName() == node.Symbol.InnerSymbol.ContainingNamespace.NamespaceFullName();
         }
     }
 }
