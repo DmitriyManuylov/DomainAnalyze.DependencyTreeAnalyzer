@@ -2,6 +2,7 @@
 using Microsoft.CodeAnalysis;
 using System;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -16,7 +17,7 @@ namespace DomainAnalyze.DependencyTree.Services
         private HashSet<NamedTypeCashModel> NamedTypesPlainList { get; set; } = [];
         private HashSet<MethodCashModel> MethodsPlainList { get; set; } = [];
 
-        public IEnumerable<NamedTypeCashModel> NamedTypeEnumerable => NamedTypesPlainList;
+        public ImmutableArray<NamedTypeCashModel> NamedTypeEnumerable => NamedTypesPlainList.ToImmutableArray();
 
         public NamedTypeCashModel GetNamedType(INamedTypeSymbol namedTypeSymbol)
         {

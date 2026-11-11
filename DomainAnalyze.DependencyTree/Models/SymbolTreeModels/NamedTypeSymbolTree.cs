@@ -42,5 +42,15 @@ namespace DomainAnalyze.DependencyTree.Models.SymbolTreeModels
 
             return Nodes.TryGetValue(node, out var outNode) ? outNode : null;
         }
+
+        public void RemoveNode(NamedTypeCashModel node)
+        {
+            var treeNode = FindNode(node);
+
+            foreach (var parent in treeNode.ParentList)
+            {
+                parent.ContainingTypeNode.ChildrenList.Remove(treeNode)
+            }
+        }
     }
 }
