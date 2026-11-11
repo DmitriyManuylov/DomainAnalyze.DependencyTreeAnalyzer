@@ -19,6 +19,7 @@ namespace DomainAnalyze.DependencyTree.Models.CashModels
         public string Name { get; private set; }
 
         public HashSet<MethodCashModel> MethodList { get; set; } = [];
+        public DocumentCashModel DocumentModel { get; set; }
         public CompilationCashModel CompilationModel { get; set; }
 
         public void UpGeneration()
@@ -40,6 +41,8 @@ namespace DomainAnalyze.DependencyTree.Models.CashModels
                 Name = _innerSymbol.Name;
             }
         }
+
+        public Project Project => CompilationModel.Project;
 
         public override bool Equals(object obj)
         {

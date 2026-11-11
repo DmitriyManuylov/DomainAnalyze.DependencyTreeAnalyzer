@@ -56,7 +56,7 @@ namespace DomainAnalyze.DependencyTree.Services
         private List<IDependencyRegistrationsSearcher> DependencyRegistrationSearchersList;
         protected HashSet<NamedTypeCashModel> DIRoots;
 
-        private DependenciesState DependenciesState;
+        private DependenciesTreeState DependenciesTreeState;
 
         private object ChangedHadlerLocker = new object();
         private SolutionFilesWatcher SolutionFilesWatcher;
@@ -78,7 +78,7 @@ namespace DomainAnalyze.DependencyTree.Services
             DependencyRegistrationSearchersList = new List<IDependencyRegistrationsSearcher>();
             DIRoots = new HashSet<NamedTypeCashModel>();
             SymbolTree = new NamedTypeSymbolTree();
-            DependenciesState = new DependenciesState();
+            DependenciesTreeState = new DependenciesTreeState();
         }
 
         static DependencyTreeAnalyzer()
@@ -107,7 +107,7 @@ namespace DomainAnalyze.DependencyTree.Services
 
                 reloadableWorkspace.InitializeAsync(solution).GetAwaiter().GetResult();
 
-                SolutionFilesWatcher = new SolutionFilesWatcher(reloadableWorkspace, DependenciesState);
+                SolutionFilesWatcher = new SolutionFilesWatcher(reloadableWorkspace, DependenciesTreeState);
                 SolutionFilesWatcher.AddFileWatcher();
 
                 Workspace = reloadableWorkspace;
@@ -140,7 +140,7 @@ namespace DomainAnalyze.DependencyTree.Services
 
                 reloadableWorkspace.InitializeAsync(newSolution).GetAwaiter().GetResult();
 
-                SolutionFilesWatcher = new SolutionFilesWatcher(reloadableWorkspace, DependenciesState);
+                SolutionFilesWatcher = new SolutionFilesWatcher(reloadableWorkspace, DependenciesTreeState);
                 SolutionFilesWatcher.AddFileWatcher();
 
                 Workspace = reloadableWorkspace;
@@ -237,12 +237,12 @@ namespace DomainAnalyze.DependencyTree.Services
 
                 foreach (var symbol in symbols)
                 {
-                    DependenciesState.AddOrGetNamedType(project, semanticModel, doc, symbol);
+                    DependenciesTreeState.AddOrGetNamedType(project, semanticModel, doc, symbol);
                 }
 
                 foreach (var symbol in interfaceSymbols)
                 {
-                    DependenciesState.AddOrGetNamedType(project, semanticModel, doc, symbol);
+                    DependenciesTreeState.AddOrGetNamedType(project, semanticModel, doc, symbol);
                 }
             }
         }
@@ -257,6 +257,8 @@ namespace DomainAnalyze.DependencyTree.Services
 
                 foreach (var projectChange in args.NewSolution.GetChanges(args.OldSolution).GetProjectChanges())
                 {
+                    CompilationCashModel compilationCashModel = DependenciesTreeState.GetCompilation(projectChange.NewProject);
+
                     foreach (var doc in projectChange.GetChangedDocuments())
                     {
                         var document = projectChange.NewProject.GetDocument(doc);
@@ -286,7 +288,7 @@ namespace DomainAnalyze.DependencyTree.Services
             foreach (var dep in deps)
             {
                 List<NamedTypeCashModel> implementations = new List<NamedTypeCashModel>();
-                var node = DependenciesState.GetNamedType(dep.Type as INamedTypeSymbol);
+                var node = DependenciesTreeState.GetNamedType(dep.Type as INamedTypeSymbol);
                 if (node is null)
                     continue;
 
@@ -299,7 +301,7 @@ namespace DomainAnalyze.DependencyTree.Services
                     implementations.Add(node);
                 }
 
-                if (implementations is null || !implementations.Any())
+                if (implementations is null || implementations.Count == 0)
                     continue;
 
                 foreach (var implement in implementations)
@@ -417,7 +419,7 @@ namespace DomainAnalyze.DependencyTree.Services
                 throw new InvalidOperationException();
             }
 
-            result = DependenciesState.NamedTypeEnumerable.Where(item => item.InnerSymbol.Interfaces.Any(item => NamedTypeEqualityComparer.Instance.Equals(item, interfaceType.InnerSymbol))).ToList();
+            result = DependenciesTreeState.NamedTypeEnumerable.Where(item => item.InnerSymbol.Interfaces.Any(item => NamedTypeEqualityComparer.Instance.Equals(item, interfaceType.InnerSymbol))).ToList();
 
             InterfacesImplementations.TryAdd(interfaceType, result);
 
@@ -426,7 +428,7 @@ namespace DomainAnalyze.DependencyTree.Services
 
         private List<NamedTypeCashModel> GetControllers()
         {
-            var controllers = DependenciesState.NamedTypeEnumerable.Where(item =>
+            var controllers = DependenciesTreeState.NamedTypeEnumerable.Where(item =>
                 item.Name.Contains("Controller") && item.InnerSymbol.BaseType.Name.Contains("Controller"));
 
             return controllers.ToList();
@@ -436,7 +438,7 @@ namespace DomainAnalyze.DependencyTree.Services
         {
             List<DependencyRegistrationModel> dependencyRegistrations = new();
 
-            foreach (var type in DependenciesState.NamedTypeEnumerable.Where(item => item.InnerSymbol.TypeKind == TypeKind.Class))
+            foreach (var type in DependenciesTreeState.NamedTypeEnumerable.Where(item => item.InnerSymbol.TypeKind == TypeKind.Class))
             {
                 foreach(var searcher in DependencyRegistrationSearchersList)
                 {
@@ -480,7 +482,7 @@ namespace DomainAnalyze.DependencyTree.Services
                         if (item.Property.Type is not INamedTypeSymbol propType)
                             return false;
 
-                        var node = DependenciesState.GetNamedType(propType);
+                        var node = DependenciesTreeState.GetNamedType(propType);
                         if (node is null || !InterfacesImplementations.ContainsKey(node))
                             return false;
 
@@ -562,14 +564,27 @@ namespace DomainAnalyze.DependencyTree.Services
 
                 foreach (var invocation in allInvocations)
                 {
+                    var methodModel = new MethodCashModel
+                    {
+                        InnerSymbol = invocation.TargetMethod,
+                        ContainingType = dep,
+                    };
+
+                    if (dep.MethodList.TryGetValue(methodModel, out var existed))
+                        methodModel = existed;
+                    else
+                        DependenciesTreeState.AddOrGetMethod(dep.Project, dep.DocumentModel.SemanticModel, dep.DocumentModel.Document, methodModel.InnerSymbol);
+
                     if (OwnCallsMapping.TryGetValue(invocation.TargetMethod, out var invocations))
                     {
-                        invocations.AddRange(allInvocations);
+                        invocations.Add(invocation);
+                        methodModel.MethodInvocations.Add(invocation);
                         continue;
                     }
 
                     invocations = new List<IInvocationOperation>();
                     invocations.Add(invocation);
+                    methodModel.MethodInvocations.Add(invocation);
                     OwnCallsMapping.TryAdd(invocation.TargetMethod, invocations);
                 }
             }
@@ -593,7 +608,7 @@ namespace DomainAnalyze.DependencyTree.Services
             var instance = new TType()
             {
                 Solution = Solution,
-                DependenciesState = DependenciesState,
+                DependenciesState = DependenciesTreeState,
             };
 
             DependencyRegistrationSearchersList.Add(instance);

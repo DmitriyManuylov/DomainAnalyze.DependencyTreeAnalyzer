@@ -21,11 +21,11 @@ namespace DomainAnalyze.DependencyTree.Services
         private ReloadableWorkspace Workspace;
         private FileSystemWatcher FileSystemWatcher;
         private SemaphoreSlim locker = new(1, 1);
-        private DependenciesState DependenciesState;
+        private DependenciesTreeState DependenciesState;
 
         ConcurrentQueue<FileChangeModel> FilesQueue = new();
 
-        public SolutionFilesWatcher(ReloadableWorkspace workspace, DependenciesState dependenciesState)
+        public SolutionFilesWatcher(ReloadableWorkspace workspace, DependenciesTreeState dependenciesState)
         {
             DependenciesState = dependenciesState;
             Workspace = workspace;

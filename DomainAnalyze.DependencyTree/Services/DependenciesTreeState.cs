@@ -9,7 +9,7 @@ using System.Threading.Tasks;
 
 namespace DomainAnalyze.DependencyTree.Services
 {
-    public class DependenciesState
+    public class DependenciesTreeState
     {
         private int Generation;
         private HashSet<CompilationCashModel> CompilationCashModelList { get; set; } = [];
@@ -25,6 +25,48 @@ namespace DomainAnalyze.DependencyTree.Services
             {
                 InnerSymbol = namedTypeSymbol,
             }, out var namedTypeModel) ? namedTypeModel : null;
+        }
+
+        public CompilationCashModel GetCompilation(Project project)
+        {
+            CompilationCashModelList.TryGetValue(new CompilationCashModel
+            {
+                Project = project
+            }, out var value);
+
+            return value;
+        }
+
+        public CompilationCashModel this[Project project]
+        {
+            get => CompilationCashModelList.TryGetValue(new CompilationCashModel
+            {
+                Project = project
+            }, out var value) ? value : null;
+        }
+
+        public DocumentCashModel this[SyntaxTree syntaxTree]
+        {
+            get => SyntaxTriesPlainList.TryGetValue(new DocumentCashModel
+            {
+                SyntaxTree = syntaxTree
+            }, out var value) ? value : null;
+        }
+
+        public NamedTypeCashModel this[INamedTypeSymbol namedTypeSymbol]
+        {
+            get => NamedTypesPlainList.TryGetValue(new NamedTypeCashModel
+            {
+                InnerSymbol = namedTypeSymbol
+            }, out var value) ? value: null;
+        }
+
+        public MethodCashModel this[IMethodSymbol methodSymbol]
+        {
+            get => MethodsPlainList.TryGetValue(new MethodCashModel
+            {
+                InnerSymbol = methodSymbol
+            }, out var value) ? value : null;
         }
 
         public DocumentCashModel GetDocument(string filePath)
@@ -68,12 +110,13 @@ namespace DomainAnalyze.DependencyTree.Services
 
         public NamedTypeCashModel AddOrGetNamedType(Project project, SemanticModel semanticModel, Document document, INamedTypeSymbol namedTypeSymbol, bool rewrite = false)
         {
-            var syntaxTree = AddOrGetSyntaxTree(project, semanticModel, document);
+            var documentModel = AddOrGetDocumentModel(project, semanticModel, document);
 
             var namedTypeCashModel = new NamedTypeCashModel
             {
                 InnerSymbol = namedTypeSymbol,
-                CompilationModel = syntaxTree.CompilationModel,
+                CompilationModel = documentModel.CompilationModel,
+                DocumentModel = documentModel
             };
 
             if (NamedTypesPlainList.TryGetValue(namedTypeCashModel, out var existed))
@@ -90,9 +133,9 @@ namespace DomainAnalyze.DependencyTree.Services
                 NamedTypesPlainList.Add(namedTypeCashModel);
             }
 
-            syntaxTree.NamedTypeList.Add(namedTypeCashModel);
+            documentModel.NamedTypeList.Add(namedTypeCashModel);
 
-            syntaxTree.CompilationModel.NamedTypesList.Add(namedTypeCashModel);
+            documentModel.CompilationModel.NamedTypesList.Add(namedTypeCashModel);
 
             return namedTypeCashModel;
         }
@@ -118,7 +161,7 @@ namespace DomainAnalyze.DependencyTree.Services
             return compilation;
         }
 
-        private DocumentCashModel AddOrGetSyntaxTree(Project project, SemanticModel semanticModel, Document document, bool rewrite = false)
+        private DocumentCashModel AddOrGetDocumentModel(Project project, SemanticModel semanticModel, Document document, bool rewrite = false)
         {
             var compilation = AddOrGetCompilation(project, semanticModel, document);
 

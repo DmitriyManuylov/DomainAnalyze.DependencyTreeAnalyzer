@@ -15,7 +15,7 @@ namespace DomainAnalyze.DependencyTree.Services.DependencyRegistrationsSearchSer
     public interface IDependencyRegistrationsSearcher
     {
         Solution Solution { get; init; }
-        DependenciesState DependenciesState { get; init; }
+        DependenciesTreeState DependenciesState { get; init; }
         /// <summary>
         /// Проверка соответствия типа условиям применимости
         /// </summary>

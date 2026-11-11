@@ -15,7 +15,7 @@ namespace DomainAnalyze.DependencyTree.Services.DependencyRegistrationsSearchSer
     public class DefaultNinjectRegistrationsSearcher : IDependencyRegistrationsSearcher
     {
         public Solution Solution { get; init; }
-        public DependenciesState DependenciesState { get; init; }
+        public DependenciesTreeState DependenciesState { get; init; }
 
         public bool CheckType(INamedTypeSymbol type)
         {
