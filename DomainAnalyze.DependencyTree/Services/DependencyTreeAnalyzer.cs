@@ -10,6 +10,7 @@ using Microsoft.CodeAnalysis.Host.Mef;
 using Microsoft.CodeAnalysis.MSBuild;
 using Microsoft.CodeAnalysis.Operations;
 using Microsoft.Extensions.Logging;
+using Microsoft.VisualBasic.FileIO;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -257,7 +258,7 @@ namespace DomainAnalyze.DependencyTree.Services
 
                 foreach (var projectChange in args.NewSolution.GetChanges(args.OldSolution).GetProjectChanges())
                 {
-                    CompilationCashModel compilationCashModel = DependenciesTreeState.GetCompilation(projectChange.NewProject);
+                    CompilationCashModel compilationCashModel = DependenciesTreeState[projectChange.NewProject];
 
                     foreach (var doc in projectChange.GetChangedDocuments())
                     {
@@ -288,7 +289,7 @@ namespace DomainAnalyze.DependencyTree.Services
             foreach (var dep in deps)
             {
                 List<NamedTypeCashModel> implementations = new List<NamedTypeCashModel>();
-                var node = DependenciesTreeState.GetNamedType(dep.Type as INamedTypeSymbol);
+                var node = DependenciesTreeState[dep.Type as INamedTypeSymbol];
                 if (node is null)
                     continue;
 
@@ -459,73 +460,93 @@ namespace DomainAnalyze.DependencyTree.Services
                 if (field.ContainingTypeNode.Symbol.InnerSymbol.TypeKind == TypeKind.Interface)
                     continue;
 
-                var methods = field
-                    .ContainingTypeNode
-                    .Symbol
-                    .InnerSymbol
-                    .GetMembers()
-                    .OfType<IMethodSymbol>();
+                SearchFieldInvocations(field);
+            }
+        }
 
-                foreach (var method in methods.Where(item => !item.IsImplicitlyDeclared))
+        private void SearchFieldInvocations(FieldSymbolSubnode field)
+        {
+            var fieldType = field.FieldTypeNode.Symbol;
+
+            var methods = field
+                .ContainingTypeNode
+                .Symbol
+                .InnerSymbol
+                .GetMembers()
+                .OfType<IMethodSymbol>();
+
+            foreach (var method in methods.Where(item => !item.IsImplicitlyDeclared))
+            {
+                if (!method.DeclaringSyntaxReferences.Any())
+                    continue;
+
+                SyntaxTreeSemanticMapping.TryGetValue(method.DeclaringSyntaxReferences.FirstOrDefault().SyntaxTree, out var semanticModel);
+                var methodBody = method.GetMethodBodyOperation(semanticModel);
+
+                var propertiesRefInvocations = methodBody
+                .Descendants()
+                .OfType<IPropertyReferenceOperation>()
+                .Where(item =>
                 {
-                    if (!method.DeclaringSyntaxReferences.Any())
-                        continue;
+                    if (item.Property.Type is not INamedTypeSymbol propType)
+                        return false;
 
-                    SyntaxTreeSemanticMapping.TryGetValue(method.DeclaringSyntaxReferences.FirstOrDefault().SyntaxTree, out var semanticModel);
-                    var methodBody = method.GetMethodBodyOperation(semanticModel);
+                    var node = DependenciesTreeState[propType];
+                    if (node is null || !InterfacesImplementations.ContainsKey(node))
+                        return false;
 
-                    var propertiesRefInvocations = methodBody
-                    .Descendants()
-                    .OfType<IPropertyReferenceOperation>()
-                    .Where(item =>
+                    if (!PropertiesToFieldsMapping.TryGetValue(item.Property, out var outField) || (outField is null))
+                        return false;
+
+                    return FieldSymbolEqualityComparer.Instance.Equals(outField, field.FieldSymbol);
+                })
+                .Select(item => item.Parent as IInvocationOperation)
+                .Where(item => item is not null).ToList();
+
+                foreach (var invocation in propertiesRefInvocations)
+                {
+                    var methodModel = new MethodCashModel
                     {
-                        if (item.Property.Type is not INamedTypeSymbol propType)
-                            return false;
+                        InnerSymbol = invocation.TargetMethod,
+                        ContainingType = fieldType,
+                    };
 
-                        var node = DependenciesTreeState.GetNamedType(propType);
-                        if (node is null || !InterfacesImplementations.ContainsKey(node))
-                            return false;
+                    if (fieldType.MethodList.TryGetValue(methodModel, out var existed))
+                        methodModel = existed;
+                    else
+                        DependenciesTreeState.AddOrGetMethod(fieldType.Project, fieldType.DocumentModel.SemanticModel, fieldType.DocumentModel.Document, methodModel.InnerSymbol);
 
-                        if (!PropertiesToFieldsMapping.TryGetValue(item.Property, out var outField) || (outField is null))
-                            return false;
+                    if (FieldsInvocations.TryGetValue(field.FieldSymbol, out var invocations))
+                    {
+                        invocations.Add(invocation);
+                        methodModel.MethodInvocations.Add(invocation);
+                        continue;
+                    }
 
-                        return FieldSymbolEqualityComparer.Instance.Equals(outField, field.FieldSymbol);
-                    })
+                    invocations = new List<IInvocationOperation>();
+                    invocations.Add(invocation);
+                    methodModel.MethodInvocations.Add(invocation);
+                    FieldsInvocations.TryAdd(field.FieldSymbol, invocations);
+                }
+
+                var fieldsRefInvocations = methodBody
+                    .Descendants()
+                    .OfType<IFieldReferenceOperation>()
+                    .Where(item => FieldSymbolEqualityComparer.Instance.Equals(item.Field, field.FieldSymbol))
                     .Select(item => item.Parent as IInvocationOperation)
                     .Where(item => item is not null).ToList();
 
-                    foreach (var inv in propertiesRefInvocations)
+                foreach (var inv in fieldsRefInvocations)
+                {
+                    if (FieldsInvocations.TryGetValue(field.FieldSymbol, out var invocations))
                     {
-                        if (FieldsInvocations.TryGetValue(field.FieldSymbol, out var invocations))
-                        {
-                            invocations.Add(inv);
-                            continue;
-                        }
-
-                        invocations = new List<IInvocationOperation>();
                         invocations.Add(inv);
-                        FieldsInvocations.TryAdd(field.FieldSymbol, invocations);
+                        continue;
                     }
 
-                    var fieldsRefInvocations = methodBody
-                        .Descendants()
-                        .OfType<IFieldReferenceOperation>()
-                        .Where(item => FieldSymbolEqualityComparer.Instance.Equals(item.Field, field.FieldSymbol))
-                        .Select(item => item.Parent as IInvocationOperation)
-                        .Where(item => item is not null).ToList();
-
-                    foreach (var inv in fieldsRefInvocations)
-                    {
-                        if (FieldsInvocations.TryGetValue(field.FieldSymbol, out var invocations))
-                        {
-                            invocations.Add(inv);
-                            continue;
-                        }
-
-                        invocations = new List<IInvocationOperation>();
-                        invocations.Add(inv);
-                        FieldsInvocations.TryAdd(field.FieldSymbol, invocations);
-                    }
+                    invocations = new List<IInvocationOperation>();
+                    invocations.Add(inv);
+                    FieldsInvocations.TryAdd(field.FieldSymbol, invocations);
                 }
             }
         }
