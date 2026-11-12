@@ -54,122 +54,89 @@ namespace DomainAnalyze.DependencyTree.Services
             }, out var value) ? value : null;
         }
 
-        public DocumentCashModel GetDocument(string filePath)
-        {
-            DocumentCashPlainList.TryGetValue(new DocumentCashModel
-            {
-                FilePath = filePath,
-            }, out var actualValue);
-
-            return actualValue;
-        }
-
         public MethodCashModel AddOrGetMethod(Project project, SemanticModel semanticModel, Document document, IMethodSymbol methodSymbol, bool rewrite = false)
         {
+            var methodModel = this[methodSymbol];
+
+            if (methodModel is not null && !rewrite)
+            {
+                return methodModel;
+            }
+
             var type = AddOrGetNamedType(project, semanticModel, document, methodSymbol.ContainingType, rewrite);
 
-            var methodModel = new MethodCashModel
-            {
-                InnerSymbol = methodSymbol,
-                ContainingType = type,
-            };
-
-            if (type.MethodList.TryGetValue(methodModel, out var existedMethodModel))
-            {
-                methodModel = existedMethodModel;
-
-                if (rewrite)
-                {
-                    methodModel.InnerSymbol = methodSymbol;
-                }
-            }
-            else
-            {
-                type.MethodList.Add(methodModel);
-            }
+            methodModel ??= new MethodCashModel();
+            methodModel.InnerSymbol = methodSymbol;
+            methodModel.ContainingType = type;
 
             MethodsPlainList.Add(methodModel);
+            type.MethodList.Add(methodModel);
 
             return methodModel;
         }
 
         public NamedTypeCashModel AddOrGetNamedType(Project project, SemanticModel semanticModel, Document document, INamedTypeSymbol namedTypeSymbol, bool rewrite = false)
         {
+            var typeModel = this[namedTypeSymbol];
+
             var documentModel = AddOrGetDocumentModel(project, semanticModel, document);
 
-            var namedTypeCashModel = new NamedTypeCashModel
+            if (typeModel is not null && !rewrite)
             {
-                InnerSymbol = namedTypeSymbol,
-                CompilationModel = documentModel.CompilationModel,
-                DocumentModel = documentModel
-            };
-
-            if (NamedTypesPlainList.TryGetValue(namedTypeCashModel, out var existed))
-            {
-                namedTypeCashModel = existed;
-
-                if (rewrite)
-                {
-                    namedTypeCashModel.InnerSymbol = namedTypeSymbol;
-                }
-            }
-            else
-            {
-                NamedTypesPlainList.Add(namedTypeCashModel);
+                typeModel.DocumentModelSet.Add(documentModel);
+                return typeModel;
             }
 
-            documentModel.NamedTypeList.Add(namedTypeCashModel);
+            typeModel ??= new NamedTypeCashModel();
+            typeModel.InnerSymbol = namedTypeSymbol;
+            typeModel.CompilationModel = documentModel.CompilationModel;
 
-            documentModel.CompilationModel.NamedTypesList.Add(namedTypeCashModel);
+            NamedTypesPlainList.Add(typeModel);
+            typeModel.DocumentModelSet.Add(documentModel);
+            documentModel.NamedTypeList.Add(typeModel);
+            documentModel.CompilationModel.NamedTypesList.Add(typeModel);
 
-            return namedTypeCashModel;
+            return typeModel;
         }
 
         private CompilationCashModel AddOrGetCompilation(Project project, SemanticModel semanticModel, Document document, bool rewrite = false)
         {
-            CompilationCashModel compilation = new()
-            {
-                Compilation = semanticModel.Compilation,
-                Project = project,
-            };
+            var compilation = this[project];
 
-            if (CompilationCashModelList.TryGetValue(compilation, out var existedCompilation))
+            if (compilation is not null && !rewrite)
             {
-                if (!rewrite)
-                    compilation = existedCompilation;
+                return compilation;
             }
-            else
-            {
-                CompilationCashModelList.Add(compilation);
-            }
+
+            compilation ??= new CompilationCashModel();
+            compilation.Compilation = semanticModel.Compilation;
+            compilation.Project = project;
+
+            CompilationCashModelList.Add(compilation);
 
             return compilation;
         }
 
         private DocumentCashModel AddOrGetDocumentModel(Project project, SemanticModel semanticModel, Document document, bool rewrite = false)
         {
+            var documentModel = this[semanticModel.SyntaxTree];
+
+            if (documentModel is not null && !rewrite)
+            {
+                return documentModel;
+            }
+
             var compilation = AddOrGetCompilation(project, semanticModel, document);
 
-            var syntaxTreeModel = new DocumentCashModel()
-            {
-                SemanticModel = semanticModel,
-                CompilationModel = compilation,
-                Document = document,
-            };
+            documentModel ??= new DocumentCashModel();
+            documentModel.SemanticModel = semanticModel;
+            documentModel.CompilationModel = compilation;
+            documentModel.Document = document;
 
-            if (this.DocumentCashPlainList.TryGetValue(syntaxTreeModel, out var existedSyntaxTree))
-            {
-                if (!rewrite)
-                    syntaxTreeModel = existedSyntaxTree;
-            }
-            else
-            {
-                DocumentCashPlainList.Add(syntaxTreeModel);
-            }
+            DocumentCashPlainList.Add(documentModel);
+            compilation.DocumentsList.Add(documentModel);
 
-            compilation.DocumentsList.Add(syntaxTreeModel);
-
-            return syntaxTreeModel;
+            return documentModel;
         }
     }
 }

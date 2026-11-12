@@ -34,9 +34,9 @@ namespace DomainAnalyze.DependencyTree.Services.DependencyRegistrationsSearchSer
 
             var compilation = namedTypeModel.CompilationModel.Compilation;
 
-            var syntaxNode = await namedTypeModel.DocumentModel.SyntaxTree.GetRootAsync();
+            var syntaxNode = await namedTypeModel.DocumentModelSet.FirstOrDefault().SyntaxTree.GetRootAsync();
 
-            var semanticModel = namedTypeModel.DocumentModel.SemanticModel;
+            var semanticModel = namedTypeModel.DocumentModelSet.FirstOrDefault().SemanticModel;
 
             var bindsSyntax = syntaxNode.DescendantNodes().OfType<InvocationExpressionSyntax>()
                 .Where(item =>
@@ -60,6 +60,9 @@ namespace DomainAnalyze.DependencyTree.Services.DependencyRegistrationsSearchSer
                 bindTypeSymbol = GetBindingType(op);
 
                 if (bindTypeSymbol is null)
+                    continue;
+
+                if (DependenciesState[bindTypeSymbol] is null)
                     continue;
 
                 switch (nextOp.TargetMethod.Name)
@@ -92,6 +95,9 @@ namespace DomainAnalyze.DependencyTree.Services.DependencyRegistrationsSearchSer
                             .ReturnedValue.Type as INamedTypeSymbol;
                         break;
                 }
+
+                if (toTypeSymbol is null || DependenciesState[toTypeSymbol] is null)
+                    continue;
 
                 dependencyRegistrations.Add(new DependencyRegistrationModel
                 {

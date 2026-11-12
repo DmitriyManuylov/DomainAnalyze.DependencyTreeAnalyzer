@@ -10,6 +10,7 @@ using Microsoft.CodeAnalysis.Host.Mef;
 using Microsoft.CodeAnalysis.MSBuild;
 using Microsoft.CodeAnalysis.Operations;
 using System.Diagnostics;
+using System.Runtime.Intrinsics.Arm;
 
 namespace DomainAnalyze.DependencyTree.Services
 {
@@ -32,13 +33,8 @@ namespace DomainAnalyze.DependencyTree.Services
         private HashSet<NamedTypeCashModel> ProcessedInjections;
         protected NamedTypeSymbolTree SymbolTree { get; private set; }
         protected Dictionary<IPropertySymbol, IFieldSymbol> PropertiesToFieldsMapping;
-        protected Dictionary<IFieldSymbol, List<IInvocationOperation>> FieldsInvocations;
-        protected Dictionary<SyntaxTree, SemanticModel> SyntaxTreeSemanticMapping;
 
-        /// <summary>
-        /// Вызовы собственных методов класса
-        /// </summary>
-        protected Dictionary<IMethodSymbol, List<IInvocationOperation>> OwnCallsMapping;
+        protected Dictionary<SyntaxTree, (SemanticModel SemanticModel, Document Document)> SyntaxTreeSemanticMapping;
 
         protected Dictionary<NamedTypeCashModel, List<NamedTypeCashModel>> InterfacesImplementations;
         private List<IDependencyRegistrationsSearcher> DependencyRegistrationSearchersList;
@@ -58,9 +54,7 @@ namespace DomainAnalyze.DependencyTree.Services
             DIImplementations = new HashSet<NamedTypeCashModel>();
             ProcessedInjections = new HashSet<NamedTypeCashModel>();
             PropertiesToFieldsMapping = new Dictionary<IPropertySymbol, IFieldSymbol>(PropertySymbolEqualityComparer.Instance);
-            FieldsInvocations = new Dictionary<IFieldSymbol, List<IInvocationOperation>>(FieldSymbolEqualityComparer.Instance);
-            SyntaxTreeSemanticMapping = new Dictionary<SyntaxTree, SemanticModel>(SyntaxTreeEqualityComparer.Instance);
-            OwnCallsMapping = new Dictionary<IMethodSymbol, List<IInvocationOperation>>(MethodSymbolEqualityComparer.Instance);
+            SyntaxTreeSemanticMapping = new Dictionary<SyntaxTree, (SemanticModel SemanticModel, Document Document)>(SyntaxTreeEqualityComparer.Instance);
             InterfacesImplementations = new Dictionary<NamedTypeCashModel, List<NamedTypeCashModel>>();
             DependencyRegistrationSearchersList = new List<IDependencyRegistrationsSearcher>();
             DIRoots = new HashSet<NamedTypeCashModel>();
@@ -466,6 +460,7 @@ namespace DomainAnalyze.DependencyTree.Services
         private void SearchFieldInvocations(FieldSymbolSubnode field)
         {
             var fieldType = field.FieldTypeNode.Symbol;
+            var containingTypeNode = field.ContainingTypeNode.Symbol;
 
             var methods = field
                 .ContainingTypeNode
@@ -479,7 +474,21 @@ namespace DomainAnalyze.DependencyTree.Services
                 if (!method.DeclaringSyntaxReferences.Any())
                     continue;
 
-                SyntaxTreeSemanticMapping.TryGetValue(method.DeclaringSyntaxReferences.FirstOrDefault().SyntaxTree, out var semanticModel);
+                var syntaxTree = method.DeclaringSyntaxReferences.FirstOrDefault().SyntaxTree;
+
+                SemanticModel semanticModel;
+                Document document;
+
+                if (!SyntaxTreeSemanticMapping.TryGetValue(syntaxTree, out var existedModel))
+                {
+                    semanticModel = containingTypeNode.CompilationModel.Compilation.GetSemanticModel(method.DeclaringSyntaxReferences.First().SyntaxTree);
+                    document = Solution.GetDocument(syntaxTree);
+                }
+                else
+                {
+                    (semanticModel, document) = existedModel;
+                }
+
                 var methodBody = method.GetMethodBodyOperation(semanticModel);
 
                 var propertiesRefInvocations = methodBody
@@ -504,18 +513,20 @@ namespace DomainAnalyze.DependencyTree.Services
 
                 foreach (var invocation in propertiesRefInvocations)
                 {
-                    var methodModel = new MethodCashModel
+                    var methodModel = DependenciesTreeState.AddOrGetMethod(fieldType.Project, semanticModel, document, invocation.TargetMethod);
+
+                    if (methodModel.MethodOuterInvocations.TryGetValue(field.FieldSymbol, out var invocations))
                     {
-                        InnerSymbol = invocation.TargetMethod,
-                        ContainingType = fieldType,
-                    };
-
-                    if (fieldType.MethodList.TryGetValue(methodModel, out var existed))
-                        methodModel = existed;
+                        invocations.Add(invocation);
+                    }
                     else
-                        methodModel = DependenciesTreeState.AddOrGetMethod(fieldType.Project, fieldType.DocumentModel.SemanticModel, fieldType.DocumentModel.Document, methodModel.InnerSymbol);
-
-                    methodModel.MethodOuterInvocations.Add(invocation);
+                    {
+                        invocations = new List<IInvocationOperation>()
+                        {
+                            invocation
+                        };
+                        methodModel.MethodOuterInvocations.Add(field.FieldSymbol, invocations);
+                    }
                 }
 
                 var fieldsRefInvocations = methodBody
@@ -527,18 +538,21 @@ namespace DomainAnalyze.DependencyTree.Services
 
                 foreach (var invocation in fieldsRefInvocations)
                 {
-                    var methodModel = new MethodCashModel
+                    var methodModel = DependenciesTreeState.AddOrGetMethod(fieldType.Project, semanticModel, document, invocation.TargetMethod);
+
+                    if (methodModel.MethodOuterInvocations.TryGetValue(field.FieldSymbol, out var invocations))
                     {
-                        InnerSymbol = invocation.TargetMethod,
-                        ContainingType = fieldType,
-                    };
-
-                    if (fieldType.MethodList.TryGetValue(methodModel, out var existed))
-                        methodModel = existed;
+                        invocations.Add(invocation);
+                    }
                     else
-                        methodModel = DependenciesTreeState.AddOrGetMethod(fieldType.Project, fieldType.DocumentModel.SemanticModel, fieldType.DocumentModel.Document, methodModel.InnerSymbol);
+                    {
+                        invocations = new List<IInvocationOperation>()
+                        {
+                            invocation
+                        };
 
-                    methodModel.MethodOuterInvocations.Add(invocation);
+                        methodModel.MethodOuterInvocations.Add(field.FieldSymbol, invocations);
+                    }
                 }
             }
         }
@@ -568,7 +582,20 @@ namespace DomainAnalyze.DependencyTree.Services
                 if (!method.DeclaringSyntaxReferences.Any())
                     continue;
 
-                var semanticModel = dep.DocumentModel.SemanticModel;
+                var syntaxTree = method.DeclaringSyntaxReferences.FirstOrDefault().SyntaxTree;
+
+                SemanticModel semanticModel;
+                Document document;
+
+                if (!SyntaxTreeSemanticMapping.TryGetValue(syntaxTree, out var existedModel))
+                {
+                    semanticModel = dep.CompilationModel.Compilation.GetSemanticModel(syntaxTree);
+                    document = Solution.GetDocument(syntaxTree);
+                }
+                else
+                {
+                    (semanticModel, document) = existedModel;
+                }
 
                 var allInvocations = method.GetMethodBodyOperation(semanticModel)
                     .Descendants()
@@ -577,16 +604,7 @@ namespace DomainAnalyze.DependencyTree.Services
 
                 foreach (var invocation in allInvocations)
                 {
-                    var methodModel = new MethodCashModel
-                    {
-                        InnerSymbol = invocation.TargetMethod,
-                        ContainingType = dep,
-                    };
-
-                    if (dep.MethodList.TryGetValue(methodModel, out var existed))
-                        methodModel = existed;
-                    else
-                        methodModel = DependenciesTreeState.AddOrGetMethod(dep.Project, dep.DocumentModel.SemanticModel, dep.DocumentModel.Document, methodModel.InnerSymbol);
+                    var methodModel = DependenciesTreeState.AddOrGetMethod(dep.Project, semanticModel, document, invocation.TargetMethod);
 
                     methodModel.OwnTypeMethodInvocations.Add(invocation);
                 }
@@ -601,7 +619,7 @@ namespace DomainAnalyze.DependencyTree.Services
                 foreach (var doc in project.Documents)
                 {
                     var syntaxTree = await doc.GetSyntaxTreeAsync();
-                    SyntaxTreeSemanticMapping.TryAdd(syntaxTree, compilation.GetSemanticModel(syntaxTree));
+                    SyntaxTreeSemanticMapping.TryAdd(syntaxTree, (compilation.GetSemanticModel(syntaxTree), doc));
                 }
             }
         }

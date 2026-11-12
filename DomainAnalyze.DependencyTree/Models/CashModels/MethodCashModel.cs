@@ -14,7 +14,7 @@ namespace DomainAnalyze.DependencyTree.Models.CashModels
         public int Generation { get; private set; }
         private IMethodSymbol _innerSymbol;
 
-        public string MethodName { get; set; }
+        public string MethodName { get; private set; }
         public IMethodSymbol InnerSymbol
         {
             get { return _innerSymbol; }
@@ -28,7 +28,8 @@ namespace DomainAnalyze.DependencyTree.Models.CashModels
         /// <summary>
         /// Вызовы метода из другого типа
         /// </summary>
-        public List<IInvocationOperation> MethodOuterInvocations { get; set; } = [];
+        public Dictionary<IFieldSymbol, List<IInvocationOperation>> MethodOuterInvocations { get; private set; }
+            = new Dictionary<IFieldSymbol, List<IInvocationOperation>>(FieldSymbolEqualityComparer.Instance);
 
         /// <summary>
         /// Внутренние вызовы в других методах типа

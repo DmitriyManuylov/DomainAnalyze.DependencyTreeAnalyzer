@@ -19,7 +19,7 @@ namespace DomainAnalyze.DependencyTree.Models.CashModels
         public string Name { get; private set; }
 
         public HashSet<MethodCashModel> MethodList { get; set; } = [];
-        public DocumentCashModel DocumentModel { get; set; }
+        public HashSet<DocumentCashModel> DocumentModelSet { get; set; } = [];
         public CompilationCashModel CompilationModel { get; set; }
 
         public void UpGeneration()
