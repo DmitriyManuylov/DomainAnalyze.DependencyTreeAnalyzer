@@ -44,7 +44,7 @@ namespace DomainAnalyze.DependencyTree.Services
         private List<IDependencyRegistrationsSearcher> DependencyRegistrationSearchersList;
         protected HashSet<NamedTypeCashModel> DIRoots;
 
-        private DependenciesTreeState DependenciesTreeState;
+        protected DependenciesTreeState DependenciesTreeState;
 
         private object ChangedHadlerLocker = new object();
         private SolutionFilesWatcher SolutionFilesWatcher;
