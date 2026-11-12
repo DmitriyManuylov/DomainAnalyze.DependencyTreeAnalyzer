@@ -10,6 +10,9 @@ using System.Threading.Tasks;
 
 namespace DomainAnalyze.DependencyTree.Models.SymbolTreeModels
 {
+    /// <summary>
+    /// Модель - обертка над IFieldSymbol, хранящая позиции в дереве DI-зависимостей типа данных поля и типа, содержащего поле.
+    /// </summary>
     public class FieldSymbolSubnode
     {
         public NamedTypeSymbolTree Tree { get; set; }

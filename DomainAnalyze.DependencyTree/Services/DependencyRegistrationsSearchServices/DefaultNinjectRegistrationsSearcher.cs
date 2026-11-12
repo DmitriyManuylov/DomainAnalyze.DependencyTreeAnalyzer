@@ -28,13 +28,15 @@ namespace DomainAnalyze.DependencyTree.Services.DependencyRegistrationsSearchSer
         public async Task<List<DependencyRegistrationModel>> SearchRegistrations(INamedTypeSymbol type)
         {
             List<DependencyRegistrationModel> dependencyRegistrations = new();
-            var project = Solution.Projects.FirstOrDefault(item => item.AssemblyName == type.ContainingAssembly.Name);
 
-            var compilation = await project.GetCompilationAsync();
+            var namedTypeModel = DependenciesState[type];
+            var project = namedTypeModel.Project;
 
-            var syntaxNode = await type.DeclaringSyntaxReferences.First().GetSyntaxAsync();
+            var compilation = namedTypeModel.CompilationModel.Compilation;
 
-            var semanticModel = compilation.GetSemanticModel(syntaxNode.SyntaxTree);
+            var syntaxNode = await namedTypeModel.DocumentModel.SyntaxTree.GetRootAsync();
+
+            var semanticModel = namedTypeModel.DocumentModel.SemanticModel;
 
             var bindsSyntax = syntaxNode.DescendantNodes().OfType<InvocationExpressionSyntax>()
                 .Where(item =>
@@ -93,8 +95,8 @@ namespace DomainAnalyze.DependencyTree.Services.DependencyRegistrationsSearchSer
 
                 dependencyRegistrations.Add(new DependencyRegistrationModel
                 {
-                    Interface = DependenciesState.GetNamedType(bindTypeSymbol) ?? new NamedTypeCashModel { InnerSymbol = bindTypeSymbol },
-                    Implementation = DependenciesState.GetNamedType(toTypeSymbol) ?? new NamedTypeCashModel { InnerSymbol = bindTypeSymbol },
+                    Interface = DependenciesState[bindTypeSymbol] ?? new NamedTypeCashModel { InnerSymbol = bindTypeSymbol },
+                    Implementation = DependenciesState[toTypeSymbol] ?? new NamedTypeCashModel { InnerSymbol = toTypeSymbol },
                     IsSelfImplemented = isSelfImplemented,
                     OperationSyntaxNode = op.Syntax
                 });

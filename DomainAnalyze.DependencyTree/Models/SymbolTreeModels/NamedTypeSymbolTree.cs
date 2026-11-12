@@ -49,8 +49,16 @@ namespace DomainAnalyze.DependencyTree.Models.SymbolTreeModels
 
             foreach (var parent in treeNode.ParentList)
             {
-                parent.ContainingTypeNode.ChildrenList.Remove(treeNode)
+                var children = parent.ContainingTypeNode.ChildrenList.Where(item => item.FieldTypeNode.Symbol == node);
+
+                foreach (var item in children)
+                {
+                    parent.ContainingTypeNode.ChildrenList.Remove(item);
+                    Fields.Remove(item);
+                }
             }
+
+            Nodes.RemoveWhere(item => item.Symbol == node);
         }
     }
 }

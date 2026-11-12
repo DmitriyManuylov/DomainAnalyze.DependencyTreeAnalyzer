@@ -24,7 +24,17 @@ namespace DomainAnalyze.DependencyTree.Models.CashModels
                 MethodName = _innerSymbol.Name;
             }
         }
-        public List<IInvocationOperation> MethodInvocations { get; set; } = [];
+
+        /// <summary>
+        /// Вызовы метода из другого типа
+        /// </summary>
+        public List<IInvocationOperation> MethodOuterInvocations { get; set; } = [];
+
+        /// <summary>
+        /// Внутренние вызовы в других методах типа
+        /// </summary>
+        public List<IInvocationOperation> OwnTypeMethodInvocations { get; set; } = [];
+
         public NamedTypeCashModel ContainingType { get; set; }
 
         public void UpGeneration()

@@ -13,29 +13,14 @@ namespace DomainAnalyze.DependencyTree.Services
     {
         private int Generation;
         private HashSet<CompilationCashModel> CompilationCashModelList { get; set; } = [];
-        private HashSet<DocumentCashModel> SyntaxTriesPlainList { get; set; } = [];
+        private HashSet<DocumentCashModel> DocumentCashPlainList { get; set; } = [];
         private HashSet<NamedTypeCashModel> NamedTypesPlainList { get; set; } = [];
         private HashSet<MethodCashModel> MethodsPlainList { get; set; } = [];
 
+        public ImmutableArray<CompilationCashModel> CompilationModelsEnumerable => CompilationCashModelList.ToImmutableArray();
+        public ImmutableArray<DocumentCashModel> DocumentModelsEnumerable => DocumentCashPlainList.ToImmutableArray();
         public ImmutableArray<NamedTypeCashModel> NamedTypeEnumerable => NamedTypesPlainList.ToImmutableArray();
-
-        public NamedTypeCashModel GetNamedType(INamedTypeSymbol namedTypeSymbol)
-        {
-            return NamedTypesPlainList.TryGetValue(new NamedTypeCashModel
-            {
-                InnerSymbol = namedTypeSymbol,
-            }, out var namedTypeModel) ? namedTypeModel : null;
-        }
-
-        public CompilationCashModel GetCompilation(Project project)
-        {
-            CompilationCashModelList.TryGetValue(new CompilationCashModel
-            {
-                Project = project
-            }, out var value);
-
-            return value;
-        }
+        public ImmutableArray<MethodCashModel> MethodModelsEnumerable => MethodsPlainList.ToImmutableArray();
 
         public CompilationCashModel this[Project project]
         {
@@ -47,7 +32,7 @@ namespace DomainAnalyze.DependencyTree.Services
 
         public DocumentCashModel this[SyntaxTree syntaxTree]
         {
-            get => SyntaxTriesPlainList.TryGetValue(new DocumentCashModel
+            get => DocumentCashPlainList.TryGetValue(new DocumentCashModel
             {
                 SyntaxTree = syntaxTree
             }, out var value) ? value : null;
@@ -71,7 +56,7 @@ namespace DomainAnalyze.DependencyTree.Services
 
         public DocumentCashModel GetDocument(string filePath)
         {
-            SyntaxTriesPlainList.TryGetValue(new DocumentCashModel
+            DocumentCashPlainList.TryGetValue(new DocumentCashModel
             {
                 FilePath = filePath,
             }, out var actualValue);
@@ -172,14 +157,14 @@ namespace DomainAnalyze.DependencyTree.Services
                 Document = document,
             };
 
-            if (this.SyntaxTriesPlainList.TryGetValue(syntaxTreeModel, out var existedSyntaxTree))
+            if (this.DocumentCashPlainList.TryGetValue(syntaxTreeModel, out var existedSyntaxTree))
             {
                 if (!rewrite)
                     syntaxTreeModel = existedSyntaxTree;
             }
             else
             {
-                SyntaxTriesPlainList.Add(syntaxTreeModel);
+                DocumentCashPlainList.Add(syntaxTreeModel);
             }
 
             compilation.DocumentsList.Add(syntaxTreeModel);

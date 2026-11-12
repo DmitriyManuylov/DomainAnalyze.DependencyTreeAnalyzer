@@ -9,33 +9,20 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Host.Mef;
 using Microsoft.CodeAnalysis.MSBuild;
 using Microsoft.CodeAnalysis.Operations;
-using Microsoft.Extensions.Logging;
-using Microsoft.VisualBasic.FileIO;
-using System;
-using System.Collections.Generic;
 using System.Diagnostics;
-using System.Linq;
-using System.Reflection.Metadata;
-using System.Runtime.Intrinsics.Arm;
-using System.Text;
-using System.Threading;
-using System.Threading.Tasks;
-using static Microsoft.CodeAnalysis.CSharp.SyntaxTokenParser;
-using static System.Net.Mime.MediaTypeNames;
 
 namespace DomainAnalyze.DependencyTree.Services
 {
     public abstract class DependencyTreeAnalyzer
     {
-        private MefHostServices HostServices;
+        private static readonly MefHostServices HostServices = MefHostServices.Create(MefHostServices.DefaultAssemblies);
         protected Workspace Workspace { get; private set; }
         protected Solution Solution { get; private set; }
 
         public TimeStampModel TimeStampModel { get; private set; }
 
         public DependencyAnalyzerOptions AnalyzerOptions { get; set; }
-        private FileSystemWatcher FileSystemWatcher;
-        private Stopwatch Stopwatch = new Stopwatch();
+
         private Stack<NamedTypeCashModel> DependencyStack;
 
         protected string SolutionPath;
@@ -66,7 +53,6 @@ namespace DomainAnalyze.DependencyTree.Services
         {
             AnalyzerOptions ??= new();
             TimeStampModel = new TimeStampModel();
-            Stopwatch = new Stopwatch();
             DependencyStack = new Stack<NamedTypeCashModel>();
             SolutionClasses = new HashSet<NamedTypeCashModel>();
             DIImplementations = new HashSet<NamedTypeCashModel>();
@@ -93,7 +79,6 @@ namespace DomainAnalyze.DependencyTree.Services
             SolutionPath = solutionPath;
             Init();
 
-            HostServices ??= MefHostServices.Create(MefHostServices.DefaultAssemblies);
             var msBuildWorkspace = MSBuildWorkspace.Create(HostServices);
 
             Stopwatch stopwatch = new();
@@ -271,10 +256,10 @@ namespace DomainAnalyze.DependencyTree.Services
         private List<IFieldSymbol> BuildDependenciesList(NamedTypeCashModel type)
         {
             if (ProcessedInjections.Contains(type))
-                return new List<IFieldSymbol>();
+                return [];
 
             if (type is null)
-                return new List<IFieldSymbol>();
+                return [];
 
             DependencyStack.Push(type);
 
@@ -288,7 +273,7 @@ namespace DomainAnalyze.DependencyTree.Services
 
             foreach (var dep in deps)
             {
-                List<NamedTypeCashModel> implementations = new List<NamedTypeCashModel>();
+                List<NamedTypeCashModel> implementations = [];
                 var node = DependenciesTreeState[dep.Type as INamedTypeSymbol];
                 if (node is null)
                     continue;
@@ -346,7 +331,7 @@ namespace DomainAnalyze.DependencyTree.Services
             }
             injectedDeps.AddRange(controllersDeps);
 
-            injectedDeps = injectedDeps.Distinct(FieldSymbolEqualityComparer.Instance).ToList();
+            injectedDeps = [.. injectedDeps.Distinct(FieldSymbolEqualityComparer.Instance)];
 
             return injectedDeps;
         }
@@ -361,9 +346,9 @@ namespace DomainAnalyze.DependencyTree.Services
                     .GetAttributes()
                     .Any(item => item.AttributeClass?.Name?.Contains("Inject") == true) == true) ?? [];
 
-            var constructor = type.InnerSymbol.Constructors.FirstOrDefault(item => item.Parameters.Count() > 0);
+            var constructor = type.InnerSymbol.Constructors.FirstOrDefault(item => item.Parameters.Length > 0);
 
-            IEnumerable<AssignmentExpressionSyntax> injectingAssignmentsInConstructor = new List<AssignmentExpressionSyntax>();
+            IEnumerable<AssignmentExpressionSyntax> injectingAssignmentsInConstructor = [];
             if (constructor is not null)
             {
                 var constructorParams = constructor.Parameters;
@@ -413,7 +398,7 @@ namespace DomainAnalyze.DependencyTree.Services
 
         private List<NamedTypeCashModel> FindInterfaceImplementation(NamedTypeCashModel interfaceType)
         {
-            List<NamedTypeCashModel> result = new();
+            List<NamedTypeCashModel> result = [];
 
             if (interfaceType.InnerSymbol.TypeKind != TypeKind.Interface)
             {
@@ -437,11 +422,25 @@ namespace DomainAnalyze.DependencyTree.Services
 
         private async Task<List<DependencyRegistrationModel>> GetNinjectRegistrations()
         {
-            List<DependencyRegistrationModel> dependencyRegistrations = new();
+            List<DependencyRegistrationModel> dependencyRegistrations = [];
 
-            foreach (var type in DependenciesTreeState.NamedTypeEnumerable.Where(item => item.InnerSymbol.TypeKind == TypeKind.Class))
+            foreach(var project in DependenciesTreeState.CompilationModelsEnumerable)
             {
-                foreach(var searcher in DependencyRegistrationSearchersList)
+                var projectRegistrations = await GetProjectNinjectRegistrations(project);
+
+                dependencyRegistrations.AddRange(projectRegistrations);
+            }
+
+            return dependencyRegistrations;
+        }
+
+        private async Task<List<DependencyRegistrationModel>> GetProjectNinjectRegistrations(CompilationCashModel project)
+        {
+            List<DependencyRegistrationModel> dependencyRegistrations = [];
+
+            foreach (var type in project.NamedTypesList.Where(item => item.InnerSymbol.TypeKind == TypeKind.Class))
+            {
+                foreach (var searcher in DependencyRegistrationSearchersList)
                 {
                     if (!searcher.CheckType(type.InnerSymbol))
                         continue;
@@ -514,19 +513,9 @@ namespace DomainAnalyze.DependencyTree.Services
                     if (fieldType.MethodList.TryGetValue(methodModel, out var existed))
                         methodModel = existed;
                     else
-                        DependenciesTreeState.AddOrGetMethod(fieldType.Project, fieldType.DocumentModel.SemanticModel, fieldType.DocumentModel.Document, methodModel.InnerSymbol);
+                        methodModel = DependenciesTreeState.AddOrGetMethod(fieldType.Project, fieldType.DocumentModel.SemanticModel, fieldType.DocumentModel.Document, methodModel.InnerSymbol);
 
-                    if (FieldsInvocations.TryGetValue(field.FieldSymbol, out var invocations))
-                    {
-                        invocations.Add(invocation);
-                        methodModel.MethodInvocations.Add(invocation);
-                        continue;
-                    }
-
-                    invocations = new List<IInvocationOperation>();
-                    invocations.Add(invocation);
-                    methodModel.MethodInvocations.Add(invocation);
-                    FieldsInvocations.TryAdd(field.FieldSymbol, invocations);
+                    methodModel.MethodOuterInvocations.Add(invocation);
                 }
 
                 var fieldsRefInvocations = methodBody
@@ -536,17 +525,20 @@ namespace DomainAnalyze.DependencyTree.Services
                     .Select(item => item.Parent as IInvocationOperation)
                     .Where(item => item is not null).ToList();
 
-                foreach (var inv in fieldsRefInvocations)
+                foreach (var invocation in fieldsRefInvocations)
                 {
-                    if (FieldsInvocations.TryGetValue(field.FieldSymbol, out var invocations))
+                    var methodModel = new MethodCashModel
                     {
-                        invocations.Add(inv);
-                        continue;
-                    }
+                        InnerSymbol = invocation.TargetMethod,
+                        ContainingType = fieldType,
+                    };
 
-                    invocations = new List<IInvocationOperation>();
-                    invocations.Add(inv);
-                    FieldsInvocations.TryAdd(field.FieldSymbol, invocations);
+                    if (fieldType.MethodList.TryGetValue(methodModel, out var existed))
+                        methodModel = existed;
+                    else
+                        methodModel = DependenciesTreeState.AddOrGetMethod(fieldType.Project, fieldType.DocumentModel.SemanticModel, fieldType.DocumentModel.Document, methodModel.InnerSymbol);
+
+                    methodModel.MethodOuterInvocations.Add(invocation);
                 }
             }
         }
@@ -576,7 +568,7 @@ namespace DomainAnalyze.DependencyTree.Services
                 if (!method.DeclaringSyntaxReferences.Any())
                     continue;
 
-                SyntaxTreeSemanticMapping.TryGetValue(method.DeclaringSyntaxReferences.FirstOrDefault().SyntaxTree, out var semanticModel);
+                var semanticModel = dep.DocumentModel.SemanticModel;
 
                 var allInvocations = method.GetMethodBodyOperation(semanticModel)
                     .Descendants()
@@ -594,19 +586,9 @@ namespace DomainAnalyze.DependencyTree.Services
                     if (dep.MethodList.TryGetValue(methodModel, out var existed))
                         methodModel = existed;
                     else
-                        DependenciesTreeState.AddOrGetMethod(dep.Project, dep.DocumentModel.SemanticModel, dep.DocumentModel.Document, methodModel.InnerSymbol);
+                        methodModel = DependenciesTreeState.AddOrGetMethod(dep.Project, dep.DocumentModel.SemanticModel, dep.DocumentModel.Document, methodModel.InnerSymbol);
 
-                    if (OwnCallsMapping.TryGetValue(invocation.TargetMethod, out var invocations))
-                    {
-                        invocations.Add(invocation);
-                        methodModel.MethodInvocations.Add(invocation);
-                        continue;
-                    }
-
-                    invocations = new List<IInvocationOperation>();
-                    invocations.Add(invocation);
-                    methodModel.MethodInvocations.Add(invocation);
-                    OwnCallsMapping.TryAdd(invocation.TargetMethod, invocations);
+                    methodModel.OwnTypeMethodInvocations.Add(invocation);
                 }
             }
         }
