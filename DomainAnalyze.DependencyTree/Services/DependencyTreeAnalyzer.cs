@@ -2,6 +2,7 @@
 using DomainAnalyze.DependencyTree.Models.CashModels;
 using DomainAnalyze.DependencyTree.Models.SymbolTreeModels;
 using DomainAnalyze.DependencyTree.Services.DependencyRegistrationsSearchServices;
+using DomainAnalyze.DependencyTree.Services.DIRootsProviders;
 using DomainAnalyze.DependencyTree.Utilities.EqualityComparers;
 using DomainAnalyze.DependencyTree.Utilities.Extensions;
 using Microsoft.CodeAnalysis;
@@ -16,9 +17,11 @@ namespace DomainAnalyze.DependencyTree.Services
 {
     public abstract class DependencyTreeAnalyzer
     {
+        private bool IsInitialAnanyzeDone = false;
+
         private static readonly MefHostServices HostServices = MefHostServices.Create(MefHostServices.DefaultAssemblies);
         protected Workspace Workspace { get; private set; }
-        protected Solution Solution { get; private set; }
+        protected Solution Solution => Workspace.CurrentSolution;
 
         public TimeStampModel TimeStampModel { get; private set; }
 
@@ -37,6 +40,8 @@ namespace DomainAnalyze.DependencyTree.Services
         protected Dictionary<SyntaxTree, (SemanticModel SemanticModel, Document Document)> SyntaxTreeSemanticMapping;
 
         protected Dictionary<NamedTypeCashModel, List<NamedTypeCashModel>> InterfacesImplementations;
+
+        private List<IDIRootsProvider> DIRootsProvidersList;
         private List<IDependencyRegistrationsSearcher> DependencyRegistrationSearchersList;
         protected HashSet<NamedTypeCashModel> DIRoots;
 
@@ -49,15 +54,16 @@ namespace DomainAnalyze.DependencyTree.Services
         {
             AnalyzerOptions ??= new();
             TimeStampModel = new TimeStampModel();
-            DependencyStack = new Stack<NamedTypeCashModel>();
-            SolutionClasses = new HashSet<NamedTypeCashModel>();
-            DIImplementations = new HashSet<NamedTypeCashModel>();
-            ProcessedInjections = new HashSet<NamedTypeCashModel>();
+            DependencyStack = [];
+            SolutionClasses = [];
+            DIImplementations = [];
+            ProcessedInjections = [];
             PropertiesToFieldsMapping = new Dictionary<IPropertySymbol, IFieldSymbol>(PropertySymbolEqualityComparer.Instance);
             SyntaxTreeSemanticMapping = new Dictionary<SyntaxTree, (SemanticModel SemanticModel, Document Document)>(SyntaxTreeEqualityComparer.Instance);
             InterfacesImplementations = new Dictionary<NamedTypeCashModel, List<NamedTypeCashModel>>();
-            DependencyRegistrationSearchersList = new List<IDependencyRegistrationsSearcher>();
-            DIRoots = new HashSet<NamedTypeCashModel>();
+            DIRootsProvidersList = [];
+            DependencyRegistrationSearchersList = [];
+            DIRoots = [];
             SymbolTree = new NamedTypeSymbolTree();
             DependenciesTreeState = new DependenciesTreeState();
         }
@@ -97,8 +103,6 @@ namespace DomainAnalyze.DependencyTree.Services
                 Workspace = msBuildWorkspace;
             }
 
-            Solution = Workspace.CurrentSolution;
-
             Workspace.RegisterWorkspaceChangedHandler(WorkspaceChangeHandler);
         }
 
@@ -112,6 +116,8 @@ namespace DomainAnalyze.DependencyTree.Services
 
         public void ReInit(Solution newSolution)
         {
+            IsInitialAnanyzeDone = false;
+
             Workspace = newSolution.Workspace as ReloadableWorkspace;
 
             if (Workspace is null && AnalyzerOptions.UseFileWatcher)
@@ -130,7 +136,6 @@ namespace DomainAnalyze.DependencyTree.Services
                 Workspace = newSolution.Workspace;
             }
             
-            Solution = newSolution;
             SolutionPath = Solution.FilePath;
 
             Init();
@@ -138,14 +143,22 @@ namespace DomainAnalyze.DependencyTree.Services
             Workspace.RegisterWorkspaceChangedHandler(WorkspaceChangeHandler);
         }
 
-        public async Task ReAnalyze(Solution solution)
+        public async Task ReAnalyze(Solution solution = default)
         {
-            ReInit(solution);
+            ReInit(solution ?? Solution);
 
             await Analyze();
         }
 
-        public async Task Analyze()
+        /// <summary>
+        /// Обработчик события изменения рабочей области, после обновления дерева зависимостей.
+        /// </summary>
+        public virtual void WorkspaceChangeHandler()
+        {
+
+        }
+
+        public async Task BuildDependencyTreeModel()
         {
             await BuildSyntaxTreeSemanticModelMapping();
 
@@ -185,8 +198,14 @@ namespace DomainAnalyze.DependencyTree.Services
             await SearchOwnInvocationsAsync();
             stopwatch.Stop();
             TimeStampModel.InvocationsModelBuildTime = stopwatch.ElapsedMilliseconds;
+        }
 
-            stopwatch = new Stopwatch();
+        public async Task Analyze()
+        {
+            if (!IsInitialAnanyzeDone)
+                await BuildDependencyTreeModel();
+
+            Stopwatch stopwatch = new Stopwatch();
             stopwatch.Start();
             await InnerAnalyze();
             stopwatch.Stop();
@@ -229,7 +248,7 @@ namespace DomainAnalyze.DependencyTree.Services
 
         protected abstract Task InnerAnalyze();
 
-        protected virtual void WorkspaceChangeHandler(WorkspaceChangeEventArgs args)
+        private void WorkspaceChangeHandler(WorkspaceChangeEventArgs args)
         {
             lock (ChangedHadlerLocker)
             {
@@ -245,6 +264,8 @@ namespace DomainAnalyze.DependencyTree.Services
                     }
                 }
             }
+
+            WorkspaceChangeHandler();
         }
 
         private List<IFieldSymbol> BuildDependenciesList(NamedTypeCashModel type)
@@ -304,20 +325,19 @@ namespace DomainAnalyze.DependencyTree.Services
 
         private List<IFieldSymbol> GetNinjectInjections()
         {
-            var types = GetControllers();
-
-            foreach(var type in types)
-                DIRoots.Add(type);
-
-            types.ForEach(type =>
+            foreach(var DIRootProvider in DIRootsProvidersList)
             {
-                SymbolTree.AddRoot(type);
-            });
+                foreach(var type in DIRootProvider.GetDIRoots())
+                {
+                    DIRoots.Add(type);
+                    SymbolTree.AddRoot(type);
+                }
+            }
 
             List<IFieldSymbol> injectedDeps = new();
             List<IFieldSymbol> controllersDeps = new();
 
-            foreach (var type in types)
+            foreach (var type in DIRoots.AsEnumerable())
             {
                 List<IFieldSymbol> allDeps = BuildDependenciesList(type);
 
@@ -624,15 +644,26 @@ namespace DomainAnalyze.DependencyTree.Services
             }
         }
 
-        public void SetDependencyRegistrationsSearcher<TType>() where TType : class, IDependencyRegistrationsSearcher, new()
+        protected void SetDependencyRegistrationsSearcher<TDependencySearcher>() where TDependencySearcher : class, IDependencyRegistrationsSearcher, new()
         {
-            var instance = new TType()
+            var instance = new TDependencySearcher()
             {
                 Solution = Solution,
                 DependenciesState = DependenciesTreeState,
             };
 
             DependencyRegistrationSearchersList.Add(instance);
+        }
+
+        protected void SetDIRootsProvider<TDIRootsProvider>() where TDIRootsProvider : class, IDIRootsProvider, new()
+        {
+            var instance = new TDIRootsProvider()
+            {
+                Solution = Solution,
+                DependenciesState = DependenciesTreeState,
+            };
+
+            DIRootsProvidersList.Add(instance);
         }
     }
 }

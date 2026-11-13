@@ -10,9 +10,9 @@ namespace DomainAnalyze.DependencyTree.Models.SymbolTreeModels
 {
     public class NamedTypeSymbolTree
     {
-        public HashSet<NamedTypeSymbolTreeNode> Roots { get; private set; } = new HashSet<NamedTypeSymbolTreeNode>();
-        public HashSet<NamedTypeSymbolTreeNode> Nodes { get; private set; } = new HashSet<NamedTypeSymbolTreeNode>();
-        public HashSet<FieldSymbolSubnode> Fields { get; private set; } = new HashSet<FieldSymbolSubnode>();
+        public HashSet<NamedTypeSymbolTreeNode> Roots { get; private set; } = [];
+        public HashSet<NamedTypeSymbolTreeNode> Nodes { get; private set; } = [];
+        public HashSet<FieldSymbolSubnode> Fields { get; private set; } = [];
         public NamedTypeSymbolTreeNode AddRoot(NamedTypeCashModel rootSymbol)
         {
             var root = new NamedTypeSymbolTreeNode()

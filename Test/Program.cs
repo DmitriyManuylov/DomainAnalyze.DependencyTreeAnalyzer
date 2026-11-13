@@ -11,14 +11,13 @@ namespace Test
         {
             var solutionPath = ConfigurationManager.AppSettings.Get("SolutionPath");
 
-            var options = new DomainAnalyze.DependencyTree.Models.DependencyAnalyzerOptions
+            var options = new DependencyAnalyzerOptions
             {
                 UseFileWatcher = true,
             };
 
             var an = new An(solutionPath, options);
 
-            an.SetDependencyRegistrationsSearcher<DefaultNinjectRegistrationsSearcher>();
             await an.Analyze();
 
             while (true)
@@ -32,7 +31,7 @@ namespace Test
     {
         public An(string solutionPath, DependencyAnalyzerOptions analyzerOptions) : base(solutionPath, analyzerOptions)
         {
-
+            SetDependencyRegistrationsSearcher<DefaultNinjectRegistrationsSearcher>();
         }
 
         protected override async Task InnerAnalyze()
