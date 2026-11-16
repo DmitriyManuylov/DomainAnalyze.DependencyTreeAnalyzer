@@ -11,7 +11,7 @@ namespace DomainAnalyze.DependencyTree.Models.CashModels
 {
     public class MethodCashModel
     {
-        public int Generation { get; private set; }
+        public int Generation { get; internal set; }
         private IMethodSymbol _innerSymbol;
 
         public string MethodName { get; private set; }

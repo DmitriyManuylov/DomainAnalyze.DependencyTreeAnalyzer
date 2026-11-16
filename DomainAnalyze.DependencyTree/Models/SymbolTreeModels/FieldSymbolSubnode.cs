@@ -19,9 +19,18 @@ namespace DomainAnalyze.DependencyTree.Models.SymbolTreeModels
         public NamedTypeSymbolTreeNode ContainingTypeNode { get; set; }
         public NamedTypeSymbolTreeNode FieldTypeNode { get; set; }
         public IFieldSymbol FieldSymbol { get; set; }
-        public bool Equals(IFieldSymbol fieldSymbol)
+        public override bool Equals(object obj)
         {
-            return this.FieldSymbol.Name == fieldSymbol.Name && NamedTypeEqualityComparer.Instance.Equals(this.FieldSymbol.Type as INamedTypeSymbol, fieldSymbol.Type as INamedTypeSymbol) && NamedTypeEqualityComparer.Instance.Equals(this.FieldSymbol.ContainingType, fieldSymbol.ContainingType);
+            if (obj == this)
+                return true;
+
+            if (obj == null)
+                return false;
+
+            if (obj is not FieldSymbolSubnode other)
+                return false;
+
+            return this.FieldSymbol.Name == other.FieldSymbol.Name && NamedTypeEqualityComparer.Instance.Equals(this.FieldSymbol.Type as INamedTypeSymbol, other.FieldSymbol.Type as INamedTypeSymbol) && NamedTypeEqualityComparer.Instance.Equals(this.FieldSymbol.ContainingType, other.FieldSymbol.ContainingType);
         }
 
         public override int GetHashCode()

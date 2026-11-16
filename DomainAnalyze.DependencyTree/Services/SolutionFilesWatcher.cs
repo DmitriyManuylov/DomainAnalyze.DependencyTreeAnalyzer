@@ -1,17 +1,11 @@
 ﻿using DomainAnalyze.DependencyTree.Models;
+using DomainAnalyze.DependencyTree.Models.CashModels;
+using DomainAnalyze.DependencyTree.Services.DependencyTreeAnalyzer;
 using DomainAnalyze.DependencyTree.Services.Factories;
 using DomainAnalyze.DependencyTree.Utilities;
 using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.Host;
 using Microsoft.CodeAnalysis.MSBuild;
-using System;
 using System.Collections.Concurrent;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading;
-using System.Threading.Tasks;
-using static System.Net.Mime.MediaTypeNames;
 
 namespace DomainAnalyze.DependencyTree.Services
 {
@@ -23,7 +17,7 @@ namespace DomainAnalyze.DependencyTree.Services
         private SemaphoreSlim locker = new(1, 1);
         private DependenciesTreeState DependenciesState;
 
-        ConcurrentQueue<FileChangeModel> FilesQueue = new();
+        private ConcurrentQueue<FileChangeModel> FilesQueue = new();
 
         public SolutionFilesWatcher(ReloadableWorkspace workspace, DependenciesTreeState dependenciesState)
         {
@@ -98,28 +92,46 @@ namespace DomainAnalyze.DependencyTree.Services
                             files.Add(file);
                         }
 
-                        foreach (var project in files.GroupBy(file => file.Project))
+                        if (files.Any(item => item.FilePath.EndsWith(".sln")))
                         {
-                            await ReloadProjectAsync(Workspace, FileSystemUtils.SearchProjectFile(project.Key));
+                            await Workspace.ReloadSolution();
 
-                            //switch (file.ChangeType)
-                            //{
-                            //    case WatcherChangeTypes.Changed:
-                            //        var document = NodesCash.GetDocument(file.Key);
-                            //        var text = File.ReadAllText(file.Key);
-                            //        newSolution = newSolution.WithDocumentText(document.Document.Id, Microsoft.CodeAnalysis.Text.SourceText.From(text));
-                            //        break;
-                            //    default:
-                            //        await ReloadProjectAsync(Workspace, FileSystemUtils.SearchProjectFile(file.Key));
-                            //        if (!string.IsNullOrWhiteSpace(file.Value.NewName))
-                            //        {
-                            //            await ReloadProjectAsync(Workspace, FileSystemUtils.SearchProjectFile(file.Value.NewName));
-                            //        }
-                            //        break;
-                            //}
+                            continue;
                         }
 
-                        Workspace.TryApplyChanges(newSolution);
+                        foreach (var project in files.GroupBy(file => file.Project))
+                        {
+                            if (project.Any(file => file.FilePath.EndsWith(".csproj")))
+                            {
+                                await ReloadProjectAsync(Workspace, FileSystemUtils.SearchProjectFile(project.Key));
+
+                                continue;
+                            }
+
+                            if (project.Any(file => file.ChangeType != WatcherChangeTypes.Changed))
+                            {
+                                await ReloadProjectAsync(Workspace, FileSystemUtils.SearchProjectFile(project.Key));
+
+                                continue;
+                            }
+
+                            foreach (var file in project)
+                            {
+                                switch (file.ChangeType)
+                                {
+                                    case WatcherChangeTypes.Changed:
+                                        var document = DependenciesState[new DocumentCashModel { FilePath = file.FilePath }];
+                                        var text = File.ReadAllText(file.FilePath);
+                                        newSolution = newSolution.WithDocumentText(document.Document.Id, Microsoft.CodeAnalysis.Text.SourceText.From(text));
+                                        break;
+                                    default:
+                                        break;
+                                }
+                            }
+                        }
+
+                        if (newSolution != Solution)
+                            Workspace.TryApplyChanges(newSolution);
 
                         await Task.Delay(200);
                     }

@@ -18,7 +18,7 @@ namespace DomainAnalyze.DependencyTree.Models.SymbolTreeModels
             var root = new NamedTypeSymbolTreeNode()
             {
                 Symbol = rootSymbol,
-                ChildrenList = new List<FieldSymbolSubnode>(),
+                ChildrenList = [],
                 ParentList = null,
                 Tree = this
             };
@@ -36,6 +36,17 @@ namespace DomainAnalyze.DependencyTree.Models.SymbolTreeModels
             return root;
         }
 
+        public FieldSymbolSubnode this[IFieldSymbol fieldSymbol]
+        {
+            get => Fields.Contains(new FieldSymbolSubnode
+            {
+                FieldSymbol = fieldSymbol,
+            }) ? Fields.TryGetValue(new FieldSymbolSubnode
+            {
+                FieldSymbol = fieldSymbol,
+            }, out var actualValue) ? actualValue : null : null;
+        }
+
         public NamedTypeSymbolTreeNode FindNode(NamedTypeCashModel symbol)
         {
             var node = new NamedTypeSymbolTreeNode { Symbol = symbol };
@@ -49,13 +60,10 @@ namespace DomainAnalyze.DependencyTree.Models.SymbolTreeModels
 
             foreach (var parent in treeNode.ParentList)
             {
-                var children = parent.ContainingTypeNode.ChildrenList.Where(item => item.FieldTypeNode.Symbol == node);
+                var children = parent.ContainingTypeNode.ChildrenList.FirstOrDefault(item => item.FieldTypeNode.Symbol == node);
 
-                foreach (var item in children)
-                {
-                    parent.ContainingTypeNode.ChildrenList.Remove(item);
-                    Fields.Remove(item);
-                }
+                parent.ContainingTypeNode.ChildrenList.Remove(children);
+                Fields.Remove(children);
             }
 
             Nodes.RemoveWhere(item => item.Symbol == node);

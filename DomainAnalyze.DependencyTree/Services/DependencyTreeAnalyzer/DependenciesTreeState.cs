@@ -7,11 +7,12 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace DomainAnalyze.DependencyTree.Services
+namespace DomainAnalyze.DependencyTree.Services.DependencyTreeAnalyzer
 {
     public class DependenciesTreeState
     {
         private int Generation;
+        public DateTime LastUpdate { get; private set; } = DateTime.Now;
         private HashSet<CompilationCashModel> CompilationCashModelList { get; set; } = [];
         private HashSet<DocumentCashModel> DocumentCashPlainList { get; set; } = [];
         private HashSet<NamedTypeCashModel> NamedTypesPlainList { get; set; } = [];
@@ -35,6 +36,19 @@ namespace DomainAnalyze.DependencyTree.Services
             get => DocumentCashPlainList.TryGetValue(new DocumentCashModel
             {
                 SyntaxTree = syntaxTree
+            }, out var value) ? value : null;
+        }
+
+        public DocumentCashModel this[DocumentCashModel documentModel]
+        {
+            get => DocumentCashPlainList.TryGetValue(documentModel, out var value) ? value : null;
+        }
+
+        public DocumentCashModel this[Document document]
+        {
+            get => DocumentCashPlainList.TryGetValue(new DocumentCashModel
+            {
+                Document = document
             }, out var value) ? value : null;
         }
 
@@ -87,7 +101,7 @@ namespace DomainAnalyze.DependencyTree.Services
                 return typeModel;
             }
 
-            typeModel ??= new NamedTypeCashModel();
+            typeModel ??= new NamedTypeCashModel() { Generation = documentModel.CompilationModel.Generation };
             typeModel.InnerSymbol = namedTypeSymbol;
             typeModel.CompilationModel = documentModel.CompilationModel;
 
@@ -128,7 +142,7 @@ namespace DomainAnalyze.DependencyTree.Services
 
             var compilation = AddOrGetCompilation(project, semanticModel, document);
 
-            documentModel ??= new DocumentCashModel();
+            documentModel ??= new DocumentCashModel() { Generation = compilation.Generation };
             documentModel.SemanticModel = semanticModel;
             documentModel.CompilationModel = compilation;
             documentModel.Document = document;
@@ -137,6 +151,19 @@ namespace DomainAnalyze.DependencyTree.Services
             compilation.DocumentsList.Add(documentModel);
 
             return documentModel;
+        }
+
+        public void RemoveType(NamedTypeCashModel type)
+        {
+            var compilation = type.CompilationModel;
+            var docs = type.DocumentModelSet;
+            foreach (var doc in docs)
+            {
+                doc.NamedTypeList.Remove(type);
+            }
+            compilation.NamedTypesList.Remove(type);
+
+            NamedTypesPlainList.Remove(type);
         }
     }
 }
