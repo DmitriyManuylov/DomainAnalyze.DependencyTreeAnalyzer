@@ -14,13 +14,12 @@ namespace DomainAnalyze.DependencyTree.Models.SymbolTreeModels
     {
         public NamedTypeSymbolTree Tree { get; set; }
         //public HashSet<NamedTypeSymbolTreeNode> Roots { get; set; } = new HashSet<NamedTypeSymbolTreeNode>();
-        public List<FieldSymbolSubnode> ParentList { get; set; } = new List<FieldSymbolSubnode>();
-        public List<FieldSymbolSubnode> ChildrenList { get; set; } = new List<FieldSymbolSubnode>();
+        public HashSet<FieldSymbolSubnode> ParentList { get; set; } = [];
+        public HashSet<FieldSymbolSubnode> ChildrenList { get; set; } = [];
         public NamedTypeCashModel Symbol { get; set; }
 
         public NamedTypeSymbolTreeNode AddChildrenNode(IFieldSymbol fieldSymbol, NamedTypeCashModel implementation)
         {
-
             var childNode = new NamedTypeSymbolTreeNode()
             {
                 Symbol = implementation,
@@ -47,8 +46,7 @@ namespace DomainAnalyze.DependencyTree.Models.SymbolTreeModels
 
             this.Tree.Fields.Add(field);
 
-            if (childNode.ParentList is not null)
-                childNode.ParentList.Add(field);
+            childNode.ParentList?.Add(field);
 
             ChildrenList.Add(field);
 

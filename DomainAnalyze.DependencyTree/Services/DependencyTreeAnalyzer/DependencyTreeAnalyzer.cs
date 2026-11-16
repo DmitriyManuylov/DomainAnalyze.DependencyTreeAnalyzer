@@ -12,8 +12,9 @@ using Microsoft.CodeAnalysis.MSBuild;
 using Microsoft.CodeAnalysis.Operations;
 using System.Diagnostics;
 using System.Runtime.Intrinsics.Arm;
+using System.Threading.Tasks;
 
-namespace DomainAnalyze.DependencyTree.Services
+namespace DomainAnalyze.DependencyTree.Services.DependencyTreeAnalyzer
 {
     public abstract class DependencyTreeAnalyzer
     {
@@ -35,9 +36,8 @@ namespace DomainAnalyze.DependencyTree.Services
 
         private HashSet<NamedTypeCashModel> ProcessedInjections;
         protected NamedTypeSymbolTree SymbolTree { get; private set; }
-        protected Dictionary<IPropertySymbol, IFieldSymbol> PropertiesToFieldsMapping;
 
-        protected Dictionary<SyntaxTree, (SemanticModel SemanticModel, Document Document)> SyntaxTreeSemanticMapping;
+        protected Dictionary<IPropertySymbol, IFieldSymbol> PropertiesToFieldsMapping;
 
         protected Dictionary<NamedTypeCashModel, List<NamedTypeCashModel>> InterfacesImplementations;
 
@@ -59,8 +59,7 @@ namespace DomainAnalyze.DependencyTree.Services
             DIImplementations = [];
             ProcessedInjections = [];
             PropertiesToFieldsMapping = new Dictionary<IPropertySymbol, IFieldSymbol>(PropertySymbolEqualityComparer.Instance);
-            SyntaxTreeSemanticMapping = new Dictionary<SyntaxTree, (SemanticModel SemanticModel, Document Document)>(SyntaxTreeEqualityComparer.Instance);
-            InterfacesImplementations = new Dictionary<NamedTypeCashModel, List<NamedTypeCashModel>>();
+            InterfacesImplementations = [];
             DIRootsProvidersList = [];
             DependencyRegistrationSearchersList = [];
             DIRoots = [];
@@ -158,19 +157,18 @@ namespace DomainAnalyze.DependencyTree.Services
 
         }
 
-        public async Task BuildDependencyTreeModel()
+        public async Task BuildDependencyTreeModelAsync()
         {
-            await BuildSyntaxTreeSemanticModelMapping();
-
             List<INamedTypeSymbol> classes = new();
+
             foreach (var project in Solution.Projects)
             {
-                await GetProjectClasses(project);
+                await ExtractProjectClasses(project);
             }
 
             Stopwatch stopwatch = new();
             stopwatch.Start();
-            var binds = await GetNinjectRegistrations();
+            var binds = await GetNinjectRegistrationsAsync();
             foreach (var item in binds.Where(item => item.Implementation is not null))
                 DIImplementations.Add(item.Implementation);
             stopwatch.Stop();
@@ -178,7 +176,7 @@ namespace DomainAnalyze.DependencyTree.Services
 
             stopwatch = new Stopwatch();
             stopwatch.Start();
-            var list = GetNinjectInjections();
+            GetNinjectInjections();
             stopwatch.Stop();
             TimeStampModel.DependenciesSearchTime = stopwatch.ElapsedMilliseconds;
 
@@ -192,18 +190,17 @@ namespace DomainAnalyze.DependencyTree.Services
                 PropertiesToFieldsMapping.TryAdd(prop, fieldNode.FieldSymbol);
             }
 
-            stopwatch = new Stopwatch();
-            stopwatch.Start();
-            await SearchInvocations();
-            await SearchOwnInvocationsAsync();
-            stopwatch.Stop();
-            TimeStampModel.InvocationsModelBuildTime = stopwatch.ElapsedMilliseconds;
+            //stopwatch = new Stopwatch();
+            //stopwatch.Start();
+            //SearchOwnInvocations();
+            //stopwatch.Stop();
+            //TimeStampModel.InvocationsModelBuildTime = stopwatch.ElapsedMilliseconds;
         }
 
         public async Task Analyze()
         {
             if (!IsInitialAnanyzeDone)
-                await BuildDependencyTreeModel();
+                await BuildDependencyTreeModelAsync();
 
             Stopwatch stopwatch = new Stopwatch();
             stopwatch.Start();
@@ -212,37 +209,42 @@ namespace DomainAnalyze.DependencyTree.Services
             TimeStampModel.AnalyzeTime = stopwatch.ElapsedMilliseconds;
         }
 
-        private async Task GetProjectClasses(Project project)
+        private async Task ExtractProjectClasses(Project project, bool rewrite = false)
         {
             var compilation = await project.GetCompilationAsync();
 
             foreach (var doc in project.Documents)
             {
-                var syntaxTree = await doc.GetSyntaxTreeAsync();
+                await ExtractDocumentTypes(project, compilation, doc, rewrite);
+            }
+        }
 
-                var root = await syntaxTree!.GetRootAsync();
+        private async Task ExtractDocumentTypes(Project project, Compilation compilation, Document doc, bool rewrite = false)
+        {
+            var syntaxTree = await doc.GetSyntaxTreeAsync();
 
-                var semanticModel = compilation!.GetSemanticModel(syntaxTree);
+            var root = await syntaxTree!.GetRootAsync();
 
-                var types = root.DescendantNodes()
-                    .OfType<ClassDeclarationSyntax>();
+            var semanticModel = compilation!.GetSemanticModel(syntaxTree);
 
-                var interfaces = root.DescendantNodes()
-                    .OfType<InterfaceDeclarationSyntax>();
+            var types = root.DescendantNodes()
+                .OfType<ClassDeclarationSyntax>();
 
-                var symbols = types.Select(item => semanticModel.GetDeclaredSymbol(item) as INamedTypeSymbol);
+            var interfaces = root.DescendantNodes()
+                .OfType<InterfaceDeclarationSyntax>();
 
-                var interfaceSymbols = interfaces.Select(item => semanticModel.GetDeclaredSymbol(item) as INamedTypeSymbol);
+            var symbols = types.Select(item => semanticModel.GetDeclaredSymbol(item) as INamedTypeSymbol);
 
-                foreach (var symbol in symbols)
-                {
-                    DependenciesTreeState.AddOrGetNamedType(project, semanticModel, doc, symbol);
-                }
+            var interfaceSymbols = interfaces.Select(item => semanticModel.GetDeclaredSymbol(item) as INamedTypeSymbol);
 
-                foreach (var symbol in interfaceSymbols)
-                {
-                    DependenciesTreeState.AddOrGetNamedType(project, semanticModel, doc, symbol);
-                }
+            foreach (var symbol in symbols)
+            {
+                DependenciesTreeState.AddOrGetNamedType(project, semanticModel, doc, symbol, rewrite);
+            }
+
+            foreach (var symbol in interfaceSymbols)
+            {
+                DependenciesTreeState.AddOrGetNamedType(project, semanticModel, doc, symbol, rewrite);
             }
         }
 
@@ -252,15 +254,35 @@ namespace DomainAnalyze.DependencyTree.Services
         {
             lock (ChangedHadlerLocker)
             {
-                //ReAnalyze(args.NewSolution).GetAwaiter().GetResult();
+                FileInfo solutionFileInfo = new FileInfo(Solution.FilePath);
+
+                if (solutionFileInfo.LastWriteTime > DependenciesTreeState.LastUpdate)
+                {
+                    OnSolutionChangedInner(args.OldSolution, args.NewSolution);
+                }
 
                 foreach (var projectChange in args.NewSolution.GetChanges(args.OldSolution).GetProjectChanges())
                 {
                     CompilationCashModel compilationCashModel = DependenciesTreeState[projectChange.NewProject];
 
+                    FileInfo projectFileInfo = new FileInfo(projectChange.OldProject.FilePath);
+
+                    if (projectFileInfo.LastWriteTime > compilationCashModel.LastUpdate)
+                    {
+                        OnProjectChangedInner(compilationCashModel, projectChange.OldProject, projectChange.NewProject, projectFileInfo.LastWriteTime).GetAwaiter().GetResult();
+                    }
+
                     foreach (var doc in projectChange.GetChangedDocuments())
                     {
                         var document = projectChange.NewProject.GetDocument(doc);
+                        var documentModel = DependenciesTreeState[document];
+
+                        FileInfo documentFileInfo = new FileInfo(document.FilePath);
+
+                        if (documentFileInfo.LastAccessTime > documentModel.LastUpdate)
+                        {
+                            OnDocumentChangedInner(documentModel, document);
+                        }
                     }
                 }
             }
@@ -268,62 +290,153 @@ namespace DomainAnalyze.DependencyTree.Services
             WorkspaceChangeHandler();
         }
 
-        private List<IFieldSymbol> BuildDependenciesList(NamedTypeCashModel type)
+        private void OnSolutionChangedInner(Solution oldSolution, Solution newSolution)
+        {
+            ReAnalyze().GetAwaiter().GetResult();
+
+            OnSolutionChanged(oldSolution, newSolution);
+        }
+
+        private async Task OnProjectChangedInner(CompilationCashModel compilationCashModel, Project oldProject, Project newProject, DateTime lastWriteTime)
+        {
+            var newCompilation = newProject.GetCompilationAsync().GetAwaiter().GetResult();
+            compilationCashModel.ResetCompilation(newCompilation, newProject, lastWriteTime);
+            compilationCashModel.Generation++;
+
+            foreach (var doc in newProject.Documents)
+            {
+                var docModel = DependenciesTreeState[doc];
+
+                var document = newProject.GetDocument(docModel.Document.Id);
+                document.TryGetSyntaxTree(out var syntaxTree);
+
+                FileInfo documentFileInfo = new FileInfo(document.FilePath);
+
+                var semanticModel = newCompilation.GetSemanticModel(syntaxTree);
+
+                await ExtractDocumentTypes(newProject, newCompilation, document, true);
+
+                docModel.ResetDocumentModel(semanticModel, document, documentFileInfo.LastWriteTime);
+                docModel.Generation++;
+            }
+
+            List<NamedTypeCashModel> typesToRemove = [];
+            List<NamedTypeCashModel> projectDIImplementations = [];
+            foreach(var type in compilationCashModel.NamedTypesList.AsEnumerable())
+            {
+                if (type.DocumentModelSet.First().Generation < compilationCashModel.Generation)
+                {
+                    typesToRemove.Add(type);
+
+                    continue;
+                }
+
+                if (DIImplementations.Contains(type))
+                    projectDIImplementations.Add(type);
+            }
+
+            foreach (var type in typesToRemove)
+            {
+                SymbolTree.RemoveNode(type);
+
+                DependenciesTreeState.RemoveType(type);
+            }
+
+            foreach (var type in projectDIImplementations)
+            {
+                var dependencies = FindTypeDependencies(type);
+
+                foreach(var dependencyField in dependencies)
+                {
+                    var dependencyTypeModel = DependenciesTreeState[dependencyField.Type as INamedTypeSymbol];
+
+                    if (InterfacesImplementations.ContainsKey(dependencyTypeModel))
+                        continue;
+
+                    BuildDependenciesList(dependencyTypeModel);
+                }
+            }
+
+            OnProjectChanged(compilationCashModel, oldProject, newProject);
+        }
+
+        private void OnDocumentChangedInner(DocumentCashModel documentCashModel, Document newDocument)
+        {
+
+
+            OnDocumentChanged(documentCashModel, newDocument);
+        }
+
+        protected abstract void OnSolutionChanged(Solution oldSolution, Solution newSolution);
+        protected abstract void OnProjectChanged(CompilationCashModel compilationCashModel, Project oldProject, Project newProject);
+        protected abstract void OnDocumentChanged(DocumentCashModel documentCashModel, Document newDocument);
+
+        private void BuildDependenciesList(NamedTypeCashModel type)
         {
             if (ProcessedInjections.Contains(type))
-                return [];
+                return;
 
             if (type is null)
-                return [];
+                return;
 
             DependencyStack.Push(type);
 
             var currentTreeNode = SymbolTree.FindNode(type);
 
-            var result = new List<IFieldSymbol>();
+            var dependencies = FindTypeDependencies(type);
 
-            var deps = FindTypeDependencies(type);
-
-            result.AddRange(deps);
-
-            foreach (var dep in deps)
+            foreach (var dependency in dependencies)
             {
-                List<NamedTypeCashModel> implementations = [];
-                var node = DependenciesTreeState[dep.Type as INamedTypeSymbol];
-                if (node is null)
-                    continue;
+                var fieldSubnode = SymbolTree[dependency];
 
-                if (dep.Type.TypeKind == TypeKind.Interface)
-                {
-                    implementations.AddRange(FindInterfaceImplementation(node));
-                }
-                else
-                {
-                    implementations.Add(node);
-                }
+                List<NamedTypeCashModel> implementations = GetDependencyImplementations(dependency);
 
                 if (implementations is null || implementations.Count == 0)
                     continue;
 
-                foreach (var implement in implementations)
+                foreach (var implementation in implementations)
                 {
-                    currentTreeNode.AddChildrenNode(dep, implement);
+                    currentTreeNode.AddChildrenNode(dependency, implementation);
 
-                    if (DependencyStack.Contains(implement))
+                    if (DependencyStack.Contains(implementation))
                         continue;
 
-                    var innerDeps = BuildDependenciesList(implement);
-
-                    result.AddRange(innerDeps);
+                    BuildDependenciesList(implementation);
+                    SearchOwnMethodInvocations(implementation);
                 }
+
+                if (fieldSubnode.ContainingTypeNode.Symbol.InnerSymbol.TypeKind == TypeKind.Interface)
+                    continue;
+
+                SearchFieldInvocations(fieldSubnode);
             }
 
             DependencyStack.Pop();
             ProcessedInjections.Add(type);
-            return result;
         }
 
-        private List<IFieldSymbol> GetNinjectInjections()
+        private List<NamedTypeCashModel> GetDependencyImplementations(IFieldSymbol dep)
+        {
+            List<NamedTypeCashModel> implementations = [];
+
+            var node = DependenciesTreeState[dep.Type as INamedTypeSymbol];
+
+            if (node is null)
+                return implementations;
+
+            if (dep.Type.TypeKind == TypeKind.Interface)
+            {
+                implementations.AddRange(FindInterfaceImplementation(node));
+            }
+            else
+            {
+                implementations.Add(node);
+            }
+
+            return implementations;
+        }
+
+        private void GetNinjectInjections()
         {
             foreach(var DIRootProvider in DIRootsProvidersList)
             {
@@ -334,25 +447,16 @@ namespace DomainAnalyze.DependencyTree.Services
                 }
             }
 
-            List<IFieldSymbol> injectedDeps = new();
-            List<IFieldSymbol> controllersDeps = new();
-
             foreach (var type in DIRoots.AsEnumerable())
             {
-                List<IFieldSymbol> allDeps = BuildDependenciesList(type);
-
-                controllersDeps.AddRange(allDeps);
+                BuildDependenciesList(type);
             }
-            injectedDeps.AddRange(controllersDeps);
-
-            injectedDeps = [.. injectedDeps.Distinct(FieldSymbolEqualityComparer.Instance)];
-
-            return injectedDeps;
         }
 
         private List<IFieldSymbol> FindTypeDependencies(NamedTypeCashModel type)
         {
             var typeFields = type.InnerSymbol.GetMembers().OfType<IFieldSymbol>();
+
             var fieldsInjectedByAttributes = typeFields
                 .Where(
                     item =>
@@ -426,15 +530,7 @@ namespace DomainAnalyze.DependencyTree.Services
             return result;
         }
 
-        private List<NamedTypeCashModel> GetControllers()
-        {
-            var controllers = DependenciesTreeState.NamedTypeEnumerable.Where(item =>
-                item.Name.Contains("Controller") && item.InnerSymbol.BaseType.Name.Contains("Controller"));
-
-            return controllers.ToList();
-        }
-
-        private async Task<List<DependencyRegistrationModel>> GetNinjectRegistrations()
+        private async Task<List<DependencyRegistrationModel>> GetNinjectRegistrationsAsync()
         {
             List<DependencyRegistrationModel> dependencyRegistrations = [];
 
@@ -466,7 +562,7 @@ namespace DomainAnalyze.DependencyTree.Services
             return dependencyRegistrations;
         }
 
-        private async Task SearchInvocations()
+        private void SearchInvocations()
         {
             foreach (var field in SymbolTree.Fields)
             {
@@ -496,20 +592,9 @@ namespace DomainAnalyze.DependencyTree.Services
 
                 var syntaxTree = method.DeclaringSyntaxReferences.FirstOrDefault().SyntaxTree;
 
-                SemanticModel semanticModel;
-                Document document;
+                var documentModel = DependenciesTreeState[syntaxTree];
 
-                if (!SyntaxTreeSemanticMapping.TryGetValue(syntaxTree, out var existedModel))
-                {
-                    semanticModel = containingTypeNode.CompilationModel.Compilation.GetSemanticModel(method.DeclaringSyntaxReferences.First().SyntaxTree);
-                    document = Solution.GetDocument(syntaxTree);
-                }
-                else
-                {
-                    (semanticModel, document) = existedModel;
-                }
-
-                var methodBody = method.GetMethodBodyOperation(semanticModel);
+                var methodBody = method.GetMethodBodyOperation(documentModel.SemanticModel);
 
                 var propertiesRefInvocations = methodBody
                 .Descendants()
@@ -523,7 +608,7 @@ namespace DomainAnalyze.DependencyTree.Services
                     if (node is null || !InterfacesImplementations.ContainsKey(node))
                         return false;
 
-                    if (!PropertiesToFieldsMapping.TryGetValue(item.Property, out var outField) || (outField is null))
+                    if (!PropertiesToFieldsMapping.TryGetValue(item.Property, out var outField) || outField is null)
                         return false;
 
                     return FieldSymbolEqualityComparer.Instance.Equals(outField, field.FieldSymbol);
@@ -533,7 +618,7 @@ namespace DomainAnalyze.DependencyTree.Services
 
                 foreach (var invocation in propertiesRefInvocations)
                 {
-                    var methodModel = DependenciesTreeState.AddOrGetMethod(fieldType.Project, semanticModel, document, invocation.TargetMethod);
+                    var methodModel = DependenciesTreeState.AddOrGetMethod(fieldType.Project, documentModel.SemanticModel, documentModel.Document, invocation.TargetMethod);
 
                     if (methodModel.MethodOuterInvocations.TryGetValue(field.FieldSymbol, out var invocations))
                     {
@@ -558,7 +643,7 @@ namespace DomainAnalyze.DependencyTree.Services
 
                 foreach (var invocation in fieldsRefInvocations)
                 {
-                    var methodModel = DependenciesTreeState.AddOrGetMethod(fieldType.Project, semanticModel, document, invocation.TargetMethod);
+                    var methodModel = DependenciesTreeState.AddOrGetMethod(fieldType.Project, documentModel.SemanticModel, documentModel.Document, invocation.TargetMethod);
 
                     if (methodModel.MethodOuterInvocations.TryGetValue(field.FieldSymbol, out var invocations))
                     {
@@ -577,21 +662,21 @@ namespace DomainAnalyze.DependencyTree.Services
             }
         }
 
-        private async Task SearchOwnInvocationsAsync()
+        private void SearchOwnInvocations()
         {
             foreach(var root in DIRoots)
-                await TypeOwnMethodInvocations(root);
+                SearchOwnMethodInvocations(root);
 
             foreach (var dep in DIImplementations)
             {
                 if (dep.InnerSymbol.TypeKind == TypeKind.Interface)
                     continue;
 
-                await TypeOwnMethodInvocations(dep);
+                SearchOwnMethodInvocations(dep);
             }
         }
 
-        private async Task TypeOwnMethodInvocations(NamedTypeCashModel dep)
+        private void SearchOwnMethodInvocations(NamedTypeCashModel dep)
         {
             var methods = dep.InnerSymbol
                 .GetMembers()
@@ -604,42 +689,18 @@ namespace DomainAnalyze.DependencyTree.Services
 
                 var syntaxTree = method.DeclaringSyntaxReferences.FirstOrDefault().SyntaxTree;
 
-                SemanticModel semanticModel;
-                Document document;
+                var documentModel = DependenciesTreeState[syntaxTree];
 
-                if (!SyntaxTreeSemanticMapping.TryGetValue(syntaxTree, out var existedModel))
-                {
-                    semanticModel = dep.CompilationModel.Compilation.GetSemanticModel(syntaxTree);
-                    document = Solution.GetDocument(syntaxTree);
-                }
-                else
-                {
-                    (semanticModel, document) = existedModel;
-                }
-
-                var allInvocations = method.GetMethodBodyOperation(semanticModel)
+                var allInvocations = method.GetMethodBodyOperation(documentModel.SemanticModel)
                     .Descendants()
                     .OfType<IInvocationOperation>()
                     .Where(invocation => NamedTypeEqualityComparer.Instance.Equals(dep.InnerSymbol, invocation.TargetMethod.ContainingType));
 
                 foreach (var invocation in allInvocations)
                 {
-                    var methodModel = DependenciesTreeState.AddOrGetMethod(dep.Project, semanticModel, document, invocation.TargetMethod);
+                    var methodModel = DependenciesTreeState.AddOrGetMethod(dep.Project, documentModel.SemanticModel, documentModel.Document, invocation.TargetMethod);
 
                     methodModel.OwnTypeMethodInvocations.Add(invocation);
-                }
-            }
-        }
-
-        private async Task BuildSyntaxTreeSemanticModelMapping()
-        {
-            foreach (var project in Solution.Projects)
-            {
-                var compilation = await project.GetCompilationAsync();
-                foreach (var doc in project.Documents)
-                {
-                    var syntaxTree = await doc.GetSyntaxTreeAsync();
-                    SyntaxTreeSemanticMapping.TryAdd(syntaxTree, (compilation.GetSemanticModel(syntaxTree), doc));
                 }
             }
         }

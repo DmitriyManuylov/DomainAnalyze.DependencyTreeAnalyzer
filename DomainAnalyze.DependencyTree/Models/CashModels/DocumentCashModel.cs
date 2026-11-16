@@ -14,7 +14,10 @@ namespace DomainAnalyze.DependencyTree.Models.CashModels
         private SyntaxTree syntaxTree;
         private SemanticModel semanticModel;
         private Document document;
-        public int Generation { get; private set; }
+        public int Generation { get; internal set; }
+
+        public DateTime LastUpdate { get; private set; } = DateTime.Now;
+
         public string FilePath
         {
             get { return filePath; }
@@ -73,6 +76,13 @@ namespace DomainAnalyze.DependencyTree.Models.CashModels
         {
             return SyntaxTree?.FilePath.GetHashCode()
                 ?? throw new Exception("Не задано синтаксическое дерево");
+        }
+
+        public void ResetDocumentModel(SemanticModel semanticModel, Document document, DateTime lastUpdate)
+        {
+            SemanticModel = semanticModel;
+            Document = document;
+            LastUpdate = lastUpdate;
         }
     }
 }

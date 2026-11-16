@@ -10,7 +10,8 @@ namespace DomainAnalyze.DependencyTree.Models.CashModels
 {
     public class CompilationCashModel
     {
-        public int Generation { get; private set; }
+        public int Generation { get; internal set; }
+        public DateTime LastUpdate { get; private set; } = DateTime.Now;
         public HashSet<NamedTypeCashModel> NamedTypesList { get; set; } = [];
         public HashSet<DocumentCashModel> DocumentsList { get; set; } = [];
 
@@ -39,6 +40,13 @@ namespace DomainAnalyze.DependencyTree.Models.CashModels
         public override int GetHashCode()
         {
             return Project.Name.GetHashCode();
+        }
+
+        public void ResetCompilation(Compilation compilation, Project project, DateTime lastUpdate)
+        {
+            Compilation = compilation;
+            Project = project;
+            LastUpdate = lastUpdate;
         }
     }
 }
