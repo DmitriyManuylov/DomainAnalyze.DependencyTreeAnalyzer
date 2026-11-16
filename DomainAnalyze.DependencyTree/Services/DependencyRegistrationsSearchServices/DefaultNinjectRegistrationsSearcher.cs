@@ -1,14 +1,10 @@
 ﻿using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Operations;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using DomainAnalyze.DependencyTree.Models;
 using DomainAnalyze.DependencyTree.Utilities.Extensions;
 using DomainAnalyze.DependencyTree.Models.CashModels;
+using DomainAnalyze.DependencyTree.Services.DependencyTreeAnalyzer;
 
 namespace DomainAnalyze.DependencyTree.Services.DependencyRegistrationsSearchServices
 {

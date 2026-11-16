@@ -13,7 +13,7 @@ namespace DomainAnalyze.DependencyTree.Models.CashModels
     public class NamedTypeCashModel
     {
         private INamedTypeSymbol _innerSymbol;
-        public int Generation { get; private set; }
+        public int Generation { get; internal set; }
         public string ProjectName {get;set;}
         public string NamespaceFullName { get; private set; }
         public string Name { get; private set; }
