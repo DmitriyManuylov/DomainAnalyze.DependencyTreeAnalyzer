@@ -11,6 +11,7 @@ namespace DomainAnalyze.DependencyTree.Models.CashModels
     public class CompilationCashModel
     {
         public int Generation { get; internal set; }
+        public DateTime LastProjectFileUpdate { get; private set; } = DateTime.Now;
         public DateTime LastUpdate { get; private set; } = DateTime.Now;
         public HashSet<NamedTypeCashModel> NamedTypesList { get; set; } = [];
         public HashSet<DocumentCashModel> DocumentsList { get; set; } = [];
@@ -42,11 +43,20 @@ namespace DomainAnalyze.DependencyTree.Models.CashModels
             return Project.Name.GetHashCode();
         }
 
-        public void ResetCompilation(Compilation compilation, Project project, DateTime lastUpdate)
+        /// <summary>
+        /// Переустановка полей модели компиляции.
+        /// </summary>
+        /// <param name="compilation">Новая компиляция проекта.</param>
+        /// <param name="project">Проект.</param>
+        /// <param name="lastProjectFileUpdate">Последнее обновление файла проекта.</param>
+        public void ResetCompilation(Compilation compilation, Project project, DateTime? lastProjectFileUpdate)
         {
             Compilation = compilation;
             Project = project;
-            LastUpdate = lastUpdate;
+            LastProjectFileUpdate = lastProjectFileUpdate ?? LastProjectFileUpdate;
+            LastUpdate = DateTime.Now;
+
+            Generation++;
         }
     }
 }

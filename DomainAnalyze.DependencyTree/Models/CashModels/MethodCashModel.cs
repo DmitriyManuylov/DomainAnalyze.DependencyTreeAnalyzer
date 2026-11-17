@@ -12,6 +12,8 @@ namespace DomainAnalyze.DependencyTree.Models.CashModels
     public class MethodCashModel
     {
         public int Generation { get; internal set; }
+        public DateTime LastUpdate { get; internal set; } = DateTime.Now;
+
         private IMethodSymbol _innerSymbol;
 
         public string MethodName { get; private set; }

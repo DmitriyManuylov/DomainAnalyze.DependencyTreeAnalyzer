@@ -77,9 +77,12 @@ namespace DomainAnalyze.DependencyTree.Services.DependencyTreeAnalyzer
                 return methodModel;
             }
 
-            var type = AddOrGetNamedType(project, semanticModel, document, methodSymbol.ContainingType, rewrite);
+            var type = AddOrGetNamedType(project, semanticModel, document, methodSymbol.ContainingType);
 
             methodModel ??= new MethodCashModel();
+            methodModel.Generation = type.Generation;
+            methodModel.LastUpdate = type.LastUpdate;
+
             methodModel.InnerSymbol = methodSymbol;
             methodModel.ContainingType = type;
 
@@ -101,7 +104,8 @@ namespace DomainAnalyze.DependencyTree.Services.DependencyTreeAnalyzer
                 return typeModel;
             }
 
-            typeModel ??= new NamedTypeCashModel() { Generation = documentModel.CompilationModel.Generation };
+            typeModel ??= new NamedTypeCashModel();
+            typeModel.Generation = documentModel.CompilationModel.Generation;
             typeModel.InnerSymbol = namedTypeSymbol;
             typeModel.CompilationModel = documentModel.CompilationModel;
 

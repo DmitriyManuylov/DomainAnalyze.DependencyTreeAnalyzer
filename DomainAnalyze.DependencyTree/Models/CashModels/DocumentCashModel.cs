@@ -53,7 +53,11 @@ namespace DomainAnalyze.DependencyTree.Models.CashModels
         public Document Document
         {
             get { return document; }
-            set { document = value; }
+            set
+            {
+                document = value;
+                FilePath= value.FilePath;
+            }
         }
 
         public void UpGeneration()
@@ -66,16 +70,15 @@ namespace DomainAnalyze.DependencyTree.Models.CashModels
             if (obj == null)
                 return false;
 
-            if (obj is not DocumentCashModel compilationCashModel)
+            if (obj is not DocumentCashModel documentModel)
                 return false;
 
-            return this.FilePath.Equals(compilationCashModel.FilePath);
+            return this.FilePath.Equals(documentModel.FilePath);
         }
 
         public override int GetHashCode()
         {
-            return SyntaxTree?.FilePath.GetHashCode()
-                ?? throw new Exception("Не задано синтаксическое дерево");
+            return this.FilePath.GetHashCode();
         }
 
         public void ResetDocumentModel(SemanticModel semanticModel, Document document, DateTime lastUpdate)
@@ -83,6 +86,7 @@ namespace DomainAnalyze.DependencyTree.Models.CashModels
             SemanticModel = semanticModel;
             Document = document;
             LastUpdate = lastUpdate;
+            Generation++;
         }
     }
 }

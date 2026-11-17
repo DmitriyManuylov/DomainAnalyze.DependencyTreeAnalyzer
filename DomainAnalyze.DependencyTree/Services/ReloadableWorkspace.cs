@@ -3,8 +3,11 @@ using DomainAnalyze.DependencyTree.Utilities;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Host;
 using Microsoft.CodeAnalysis.MSBuild;
+using Microsoft.CodeAnalysis.Text;
 using System.Reflection.Metadata;
+using System.Text;
 using System.Threading;
+using static System.Net.Mime.MediaTypeNames;
 
 namespace DomainAnalyze.DependencyTree.Services
 {
@@ -40,6 +43,16 @@ namespace DomainAnalyze.DependencyTree.Services
         public void ReloadProject(ProjectInfo projectInfo)
         {
             OnProjectReloaded(projectInfo);
+        }
+
+        public void ReloadDocument(DocumentId documentId, SourceText sourceText)
+        {
+            var document = this.CurrentSolution.GetDocument(documentId);
+
+            if (document != null)
+            {
+                this.OnDocumentTextChanged(documentId, sourceText, PreservationMode.PreserveValue);
+            }
         }
 
         public void AddProject(ProjectInfo projectInfo)
