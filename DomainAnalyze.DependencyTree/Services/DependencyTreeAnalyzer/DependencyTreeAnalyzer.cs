@@ -190,11 +190,12 @@ namespace DomainAnalyze.DependencyTree.Services.DependencyTreeAnalyzer
                 PropertiesToFieldsMapping.TryAdd(prop, fieldNode.FieldSymbol);
             }
 
-            //stopwatch = new Stopwatch();
-            //stopwatch.Start();
-            //SearchOwnInvocations();
-            //stopwatch.Stop();
-            //TimeStampModel.InvocationsModelBuildTime = stopwatch.ElapsedMilliseconds;
+            stopwatch = new Stopwatch();
+            stopwatch.Start();
+            SearchInvocations();
+            SearchOwnInvocations();
+            stopwatch.Stop();
+            TimeStampModel.InvocationsModelBuildTime = stopwatch.ElapsedMilliseconds;
         }
 
         public async Task Analyze()
@@ -400,12 +401,12 @@ namespace DomainAnalyze.DependencyTree.Services.DependencyTreeAnalyzer
                         continue;
 
                     BuildDependenciesList(implementation);
-                    SearchOwnMethodInvocations(implementation);
+                    //SearchOwnMethodInvocations(implementation);
                 }
 
-                var fieldSubnode = SymbolTree[dependency];
+                //var fieldSubnode = SymbolTree[dependency];
 
-                SearchFieldInvocations(fieldSubnode);
+                //SearchFieldInvocations(fieldSubnode);
             }
 
             DependencyStack.Pop();
