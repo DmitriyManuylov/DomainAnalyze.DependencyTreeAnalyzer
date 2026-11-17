@@ -14,6 +14,7 @@ namespace DomainAnalyze.DependencyTree.Models.CashModels
     {
         private INamedTypeSymbol _innerSymbol;
         public int Generation { get; internal set; }
+        public DateTime LastUpdate { get; internal set; } = DateTime.Now;
         public string ProjectName {get;set;}
         public string NamespaceFullName { get; private set; }
         public string Name { get; private set; }

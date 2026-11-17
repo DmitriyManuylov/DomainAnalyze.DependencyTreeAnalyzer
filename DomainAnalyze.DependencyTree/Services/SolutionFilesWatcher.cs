@@ -122,16 +122,13 @@ namespace DomainAnalyze.DependencyTree.Services
                                     case WatcherChangeTypes.Changed:
                                         var document = DependenciesState[new DocumentCashModel { FilePath = file.FilePath }];
                                         var text = File.ReadAllText(file.FilePath);
-                                        newSolution = newSolution.WithDocumentText(document.Document.Id, Microsoft.CodeAnalysis.Text.SourceText.From(text));
+                                        Workspace.ReloadDocument(document.Document.Id, Microsoft.CodeAnalysis.Text.SourceText.From(text));
                                         break;
                                     default:
                                         break;
                                 }
                             }
                         }
-
-                        if (newSolution != Solution)
-                            Workspace.TryApplyChanges(newSolution);
 
                         await Task.Delay(200);
                     }

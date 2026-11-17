@@ -47,7 +47,7 @@ namespace DomainAnalyze.DependencyTree.Services.DependencyTreeAnalyzer
 
         protected DependenciesTreeState DependenciesTreeState;
 
-        private object ChangedHadlerLocker = new object();
+        private SemaphoreSlim ChangedHadlerLocker = new SemaphoreSlim(1, 1);
         private SolutionFilesWatcher SolutionFilesWatcher;
 
         private void Init()
@@ -102,18 +102,18 @@ namespace DomainAnalyze.DependencyTree.Services.DependencyTreeAnalyzer
                 Workspace = msBuildWorkspace;
             }
 
-            Workspace.RegisterWorkspaceChangedHandler(WorkspaceChangeHandler);
+            Workspace.RegisterWorkspaceChangedHandler((args) => WorkspaceChangeHandler(args).GetAwaiter().GetResult());
         }
 
         public DependencyTreeAnalyzer(Solution solution, DependencyAnalyzerOptions analyzerOptions = null)
         {
             AnalyzerOptions = analyzerOptions;
-            ReInit(solution);
+            ReInit(solution).GetAwaiter().GetResult();
 
-            Workspace.RegisterWorkspaceChangedHandler(WorkspaceChangeHandler);
+            Workspace.RegisterWorkspaceChangedHandler((args) => WorkspaceChangeHandler(args).GetAwaiter().GetResult());
         }
 
-        public void ReInit(Solution newSolution)
+        public async Task ReInit(Solution newSolution)
         {
             IsInitialAnanyzeDone = false;
 
@@ -123,7 +123,7 @@ namespace DomainAnalyze.DependencyTree.Services.DependencyTreeAnalyzer
             {
                 var reloadableWorkspace = new ReloadableWorkspace(HostServices);
 
-                reloadableWorkspace.InitializeAsync(newSolution).GetAwaiter().GetResult();
+                await reloadableWorkspace.InitializeAsync(newSolution);
 
                 SolutionFilesWatcher = new SolutionFilesWatcher(reloadableWorkspace, DependenciesTreeState);
                 SolutionFilesWatcher.AddFileWatcher();
@@ -139,12 +139,12 @@ namespace DomainAnalyze.DependencyTree.Services.DependencyTreeAnalyzer
 
             Init();
 
-            Workspace.RegisterWorkspaceChangedHandler(WorkspaceChangeHandler);
+            Workspace.RegisterWorkspaceChangedHandler((args) => WorkspaceChangeHandler(args).GetAwaiter().GetResult());
         }
 
         public async Task ReAnalyze(Solution solution = default)
         {
-            ReInit(solution ?? Solution);
+            await ReInit(solution ?? Solution);
 
             await Analyze();
         }
@@ -159,11 +159,9 @@ namespace DomainAnalyze.DependencyTree.Services.DependencyTreeAnalyzer
 
         public async Task BuildDependencyTreeModelAsync()
         {
-            List<INamedTypeSymbol> classes = new();
-
             foreach (var project in Solution.Projects)
             {
-                await ExtractProjectClasses(project);
+                await ExtractProjectTypes(project);
             }
 
             Stopwatch stopwatch = new();
@@ -210,7 +208,7 @@ namespace DomainAnalyze.DependencyTree.Services.DependencyTreeAnalyzer
             TimeStampModel.AnalyzeTime = stopwatch.ElapsedMilliseconds;
         }
 
-        private async Task ExtractProjectClasses(Project project, bool rewrite = false)
+        private async Task ExtractProjectTypes(Project project, bool rewrite = false)
         {
             var compilation = await project.GetCompilationAsync();
 
@@ -251,81 +249,110 @@ namespace DomainAnalyze.DependencyTree.Services.DependencyTreeAnalyzer
 
         protected abstract Task InnerAnalyze();
 
-        private void WorkspaceChangeHandler(WorkspaceChangeEventArgs args)
+        private async Task WorkspaceChangeHandler(WorkspaceChangeEventArgs args)
         {
-            lock (ChangedHadlerLocker)
+            try
             {
+                await ChangedHadlerLocker.WaitAsync();
+
                 FileInfo solutionFileInfo = new FileInfo(Solution.FilePath);
 
                 if (solutionFileInfo.LastWriteTime > DependenciesTreeState.LastUpdate)
                 {
-                    OnSolutionChangedInner(args.OldSolution, args.NewSolution);
+                    await OnSolutionChangedInnerAsync(args.OldSolution, args.NewSolution);
+
+                    return;
                 }
 
                 foreach (var projectChange in args.NewSolution.GetChanges(args.OldSolution).GetProjectChanges())
                 {
                     CompilationCashModel compilationCashModel = DependenciesTreeState[projectChange.NewProject];
+                    var newCompilation = await projectChange.NewProject.GetCompilationAsync();
 
                     FileInfo projectFileInfo = new FileInfo(projectChange.OldProject.FilePath);
+                    DateTime lastProjectFileUpdate = projectFileInfo.LastWriteTime;
 
-                    if (projectFileInfo.LastWriteTime > compilationCashModel.LastUpdate)
+
+                    if (projectFileInfo.LastWriteTime > compilationCashModel.LastProjectFileUpdate)
                     {
-                        OnProjectChangedInner(compilationCashModel, projectChange.OldProject, projectChange.NewProject, projectFileInfo.LastWriteTime).GetAwaiter().GetResult();
+                        compilationCashModel.ResetCompilation(newCompilation, projectChange.NewProject, lastProjectFileUpdate);
+
+                        await OnProjectChangedInnerAsync(compilationCashModel, projectChange.OldProject, projectChange.NewProject, projectFileInfo.LastWriteTime);
+
+                        return;
                     }
+
+                    compilationCashModel.ResetCompilation(newCompilation, projectChange.NewProject, null);
 
                     foreach (var doc in projectChange.GetChangedDocuments())
                     {
-                        var document = projectChange.NewProject.GetDocument(doc);
-                        var documentModel = DependenciesTreeState[document];
+                        var newDocument = projectChange.NewProject.GetDocument(doc);
+                        var oldDocumentModel = DependenciesTreeState[newDocument];
 
-                        FileInfo documentFileInfo = new FileInfo(document.FilePath);
+                        if (oldDocumentModel is null)
+                            continue;
 
-                        if (documentFileInfo.LastAccessTime > documentModel.LastUpdate)
+                        FileInfo documentFileInfo = new FileInfo(newDocument.FilePath);
+
+                        if (documentFileInfo.LastAccessTime > oldDocumentModel.LastUpdate)
                         {
-                            OnDocumentChangedInner(documentModel, document);
+                            await OnDocumentChangedInnerAsync(compilationCashModel, oldDocumentModel, newDocument);
                         }
                     }
                 }
             }
+            catch
+            {
+
+            }
+            finally
+            {
+                ChangedHadlerLocker.Release();
+            }
+
 
             WorkspaceChangeHandler();
         }
 
-        private void OnSolutionChangedInner(Solution oldSolution, Solution newSolution)
+        private async Task OnSolutionChangedInnerAsync(Solution oldSolution, Solution newSolution)
         {
-            ReAnalyze().GetAwaiter().GetResult();
+            await ReAnalyze();
 
             OnSolutionChanged(oldSolution, newSolution);
         }
 
-        private async Task OnProjectChangedInner(CompilationCashModel compilationCashModel, Project oldProject, Project newProject, DateTime lastWriteTime)
+        private async Task OnProjectChangedInnerAsync(CompilationCashModel newCompilationCashModel, Project oldProject, Project newProject, DateTime lastWriteTime)
         {
-            var newCompilation = newProject.GetCompilationAsync().GetAwaiter().GetResult();
-            compilationCashModel.ResetCompilation(newCompilation, newProject, lastWriteTime);
-            compilationCashModel.Generation++;
-
-            foreach (var doc in newProject.Documents)
+            foreach (var newDoc in newProject.Documents)
             {
-                var docModel = DependenciesTreeState[doc];
+                var docModel = DependenciesTreeState[newDoc];
 
-                var document = newProject.GetDocument(docModel.Document.Id);
-                document.TryGetSyntaxTree(out var syntaxTree);
-
-                FileInfo documentFileInfo = new FileInfo(document.FilePath);
-
-                var semanticModel = newCompilation.GetSemanticModel(syntaxTree);
-
-                await ExtractDocumentTypes(newProject, newCompilation, document, true);
-
-                docModel.ResetDocumentModel(semanticModel, document, documentFileInfo.LastWriteTime);
-                docModel.Generation++;
+                await OnDocumentChangedInnerAsync(newCompilationCashModel, docModel, newDoc);
             }
+
+            OnProjectChanged(newCompilationCashModel, oldProject, newProject);
+        }
+
+        private async Task OnDocumentChangedInnerAsync(CompilationCashModel newCompilationCashModel, DocumentCashModel existDocumentModel, Document newDocument)
+        {
+            var document = existDocumentModel.Document;
+
+            var syntaxTree = await newDocument.GetSyntaxTreeAsync();
+
+            FileInfo documentFileInfo = new FileInfo(document.FilePath);
+
+            var semanticModel = newCompilationCashModel.Compilation.GetSemanticModel(syntaxTree);
+
+            await ExtractDocumentTypes(newCompilationCashModel.Project, newCompilationCashModel.Compilation, newDocument, true);
+
+            existDocumentModel.ResetDocumentModel(semanticModel, newDocument, documentFileInfo.LastWriteTime);
 
             List<NamedTypeCashModel> typesToRemove = [];
             List<NamedTypeCashModel> projectDIImplementations = [];
-            foreach(var type in compilationCashModel.NamedTypesList.AsEnumerable())
+
+            foreach (var type in existDocumentModel.NamedTypeList.AsEnumerable())
             {
-                if (type.DocumentModelSet.First().Generation < compilationCashModel.Generation)
+                if (type.DocumentModelSet.First().Generation < existDocumentModel.Generation)
                 {
                     typesToRemove.Add(type);
 
@@ -347,25 +374,24 @@ namespace DomainAnalyze.DependencyTree.Services.DependencyTreeAnalyzer
             {
                 var dependencies = FindTypeDependencies(type);
 
-                foreach(var dependencyField in dependencies)
+                foreach (var dependencyField in dependencies)
                 {
                     var dependencyTypeModel = DependenciesTreeState[dependencyField.Type as INamedTypeSymbol];
+                    var dependencyModel = SymbolTree[dependencyField];
+
+                    if (dependencyModel is not null)
+                        SearchFieldInvocations(dependencyModel);
 
                     if (InterfacesImplementations.ContainsKey(dependencyTypeModel))
                         continue;
 
                     BuildDependenciesList(dependencyTypeModel);
                 }
+
+                SearchOwnMethodInvocations(type);
             }
 
-            OnProjectChanged(compilationCashModel, oldProject, newProject);
-        }
-
-        private void OnDocumentChangedInner(DocumentCashModel documentCashModel, Document newDocument)
-        {
-
-
-            OnDocumentChanged(documentCashModel, newDocument);
+            OnDocumentChanged(existDocumentModel, newDocument);
         }
 
         protected abstract void OnSolutionChanged(Solution oldSolution, Solution newSolution);
@@ -571,7 +597,7 @@ namespace DomainAnalyze.DependencyTree.Services.DependencyTreeAnalyzer
             }
         }
 
-        private void SearchFieldInvocations(FieldSymbolSubnode field)
+        private void SearchFieldInvocations(FieldSymbolSubnode field, bool rewrite = false)
         {
             var fieldType = field.FieldTypeNode.Symbol;
             var containingTypeNode = field.ContainingTypeNode.Symbol;
@@ -616,18 +642,20 @@ namespace DomainAnalyze.DependencyTree.Services.DependencyTreeAnalyzer
 
                 foreach (var invocation in propertiesRefInvocations)
                 {
-                    var methodModel = DependenciesTreeState.AddOrGetMethod(fieldType.Project, documentModel.SemanticModel, documentModel.Document, invocation.TargetMethod);
+                    var methodModel = DependenciesTreeState.AddOrGetMethod(fieldType.Project, documentModel.SemanticModel, documentModel.Document, invocation.TargetMethod, rewrite);
 
-                    if (methodModel.MethodOuterInvocations.TryGetValue(field.FieldSymbol, out var invocations))
+                    if (rewrite)
+                    {
+                        methodModel.MethodOuterInvocations.Remove(field.FieldSymbol);
+                    }
+
+                    if (!rewrite && methodModel.MethodOuterInvocations.TryGetValue(field.FieldSymbol, out var invocations))
                     {
                         invocations.Add(invocation);
                     }
                     else
                     {
-                        invocations = new List<IInvocationOperation>()
-                        {
-                            invocation
-                        };
+                        invocations = [invocation];
                         methodModel.MethodOuterInvocations.Add(field.FieldSymbol, invocations);
                     }
                 }
@@ -674,7 +702,7 @@ namespace DomainAnalyze.DependencyTree.Services.DependencyTreeAnalyzer
             }
         }
 
-        private void SearchOwnMethodInvocations(NamedTypeCashModel dep)
+        private void SearchOwnMethodInvocations(NamedTypeCashModel dep, bool rewrite = false)
         {
             var methods = dep.InnerSymbol
                 .GetMembers()
@@ -696,7 +724,7 @@ namespace DomainAnalyze.DependencyTree.Services.DependencyTreeAnalyzer
 
                 foreach (var invocation in allInvocations)
                 {
-                    var methodModel = DependenciesTreeState.AddOrGetMethod(dep.Project, documentModel.SemanticModel, documentModel.Document, invocation.TargetMethod);
+                    var methodModel = DependenciesTreeState.AddOrGetMethod(dep.Project, documentModel.SemanticModel, documentModel.Document, invocation.TargetMethod, rewrite);
 
                     methodModel.OwnTypeMethodInvocations.Add(invocation);
                 }
