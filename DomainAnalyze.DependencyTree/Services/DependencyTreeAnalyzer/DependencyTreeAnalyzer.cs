@@ -1,4 +1,5 @@
-﻿using DomainAnalyze.DependencyTree.Models;
+﻿using DomainAnalyze.DependencyTree.Exceptions;
+using DomainAnalyze.DependencyTree.Models;
 using DomainAnalyze.DependencyTree.Models.CashModels;
 using DomainAnalyze.DependencyTree.Models.SymbolTreeModels;
 using DomainAnalyze.DependencyTree.Services.DependencyRegistrationsSearchServices;
@@ -11,8 +12,6 @@ using Microsoft.CodeAnalysis.Host.Mef;
 using Microsoft.CodeAnalysis.MSBuild;
 using Microsoft.CodeAnalysis.Operations;
 using System.Diagnostics;
-using System.Runtime.Intrinsics.Arm;
-using System.Threading.Tasks;
 
 namespace DomainAnalyze.DependencyTree.Services.DependencyTreeAnalyzer
 {
@@ -108,12 +107,12 @@ namespace DomainAnalyze.DependencyTree.Services.DependencyTreeAnalyzer
         public DependencyTreeAnalyzer(Solution solution, DependencyAnalyzerOptions analyzerOptions = null)
         {
             AnalyzerOptions = analyzerOptions;
-            ReInit(solution).GetAwaiter().GetResult();
+            ReInitAsync(solution).GetAwaiter().GetResult();
 
             Workspace.RegisterWorkspaceChangedHandler((args) => WorkspaceChangeHandler(args).GetAwaiter().GetResult());
         }
 
-        public async Task ReInit(Solution newSolution)
+        public async Task ReInitAsync(Solution newSolution)
         {
             IsInitialAnanyzeDone = false;
 
@@ -144,18 +143,15 @@ namespace DomainAnalyze.DependencyTree.Services.DependencyTreeAnalyzer
 
         public async Task ReAnalyze(Solution solution = default)
         {
-            await ReInit(solution ?? Solution);
+            await ReInitAsync(solution ?? Solution);
 
-            await Analyze();
+            await AnalyzeAsync();
         }
 
         /// <summary>
         /// Обработчик события изменения рабочей области, после обновления дерева зависимостей.
         /// </summary>
-        public virtual void WorkspaceChangeHandler()
-        {
-
-        }
+        public event Action OnWorkplaceChanged;
 
         public async Task BuildDependencyTreeModelAsync()
         {
@@ -196,7 +192,7 @@ namespace DomainAnalyze.DependencyTree.Services.DependencyTreeAnalyzer
             TimeStampModel.InvocationsModelBuildTime = stopwatch.ElapsedMilliseconds;
         }
 
-        public async Task Analyze()
+        public async Task AnalyzeAsync()
         {
             if (!IsInitialAnanyzeDone)
                 await BuildDependencyTreeModelAsync();
@@ -275,17 +271,8 @@ namespace DomainAnalyze.DependencyTree.Services.DependencyTreeAnalyzer
                     CompilationCashModel compilationCashModel = DependenciesTreeState[projectChange.NewProject];
                     var newCompilation = await projectChange.NewProject.GetCompilationAsync();
 
-                    var diagnostics = newCompilation.GetDiagnostics();
-
-                    foreach (var diagnostic in diagnostics)
-                    {
-                        if (diagnostic.Severity == DiagnosticSeverity.Error)
-                            throw new Exception("Ошибка компиляции");
-                    }
-
                     FileInfo projectFileInfo = new FileInfo(projectChange.OldProject.FilePath);
                     DateTime lastProjectFileUpdate = projectFileInfo.LastWriteTime;
-
 
                     if (projectFileInfo.LastWriteTime > compilationCashModel.LastProjectFileUpdate)
                     {
@@ -293,7 +280,7 @@ namespace DomainAnalyze.DependencyTree.Services.DependencyTreeAnalyzer
 
                         await OnProjectChangedInnerAsync(compilationCashModel, projectChange.OldProject, projectChange.NewProject, projectFileInfo.LastWriteTime);
 
-                        return;
+                        continue;
                     }
 
                     compilationCashModel.ResetCompilation(newCompilation, projectChange.NewProject, null);
@@ -324,8 +311,7 @@ namespace DomainAnalyze.DependencyTree.Services.DependencyTreeAnalyzer
                 ChangedHadlerLocker.Release();
             }
 
-
-            WorkspaceChangeHandler();
+            OnWorkplaceChanged();
         }
 
         private async Task OnSolutionChangedInnerAsync(Solution oldSolution, Solution newSolution)
@@ -341,7 +327,18 @@ namespace DomainAnalyze.DependencyTree.Services.DependencyTreeAnalyzer
             {
                 var docModel = DependenciesTreeState[newDoc];
 
-                await OnDocumentChangedInnerAsync(newCompilationCashModel, docModel, newDoc);
+                try
+                {
+                    await OnDocumentChangedInnerAsync(newCompilationCashModel, docModel, newDoc);
+                }
+                catch (DocumentCompilationException ex)
+                {
+
+                }
+                catch
+                {
+
+                }
             }
 
             OnProjectChanged(newCompilationCashModel, oldProject, newProject);
@@ -356,6 +353,17 @@ namespace DomainAnalyze.DependencyTree.Services.DependencyTreeAnalyzer
             FileInfo documentFileInfo = new FileInfo(document.FilePath);
 
             var semanticModel = newCompilationCashModel.Compilation.GetSemanticModel(syntaxTree);
+
+            var errors = semanticModel.GetDiagnostics().Where(item => item.Severity == DiagnosticSeverity.Error);
+
+            if (errors.Any())
+            {
+                throw new DocumentCompilationException()
+                {
+                    FilePath = newDocument.FilePath,
+                    Errors = [.. errors.Select(item => item.ToString())],
+                };
+            }
 
             await ExtractDocumentTypes(newCompilationCashModel.Project, newCompilationCashModel.Compilation, newDocument, true);
 
@@ -569,7 +577,7 @@ namespace DomainAnalyze.DependencyTree.Services.DependencyTreeAnalyzer
 
             foreach(var project in DependenciesTreeState.CompilationModelsEnumerable)
             {
-                var projectRegistrations = await GetProjectNinjectRegistrations(project);
+                var projectRegistrations = await GetProjectNinjectRegistrationsAsync(project);
 
                 dependencyRegistrations.AddRange(projectRegistrations);
             }
@@ -577,7 +585,7 @@ namespace DomainAnalyze.DependencyTree.Services.DependencyTreeAnalyzer
             return dependencyRegistrations;
         }
 
-        private async Task<List<DependencyRegistrationModel>> GetProjectNinjectRegistrations(CompilationCashModel project)
+        private async Task<List<DependencyRegistrationModel>> GetProjectNinjectRegistrationsAsync(CompilationCashModel project)
         {
             List<DependencyRegistrationModel> dependencyRegistrations = [];
 

@@ -20,8 +20,12 @@ namespace Test
             };
 
             var an = new An(solutionPath, options);
+            an.OnWorkplaceChanged += async () =>
+            {
 
-            await an.Analyze();
+            };
+
+            await an.AnalyzeAsync();
 
             while (true)
             {
