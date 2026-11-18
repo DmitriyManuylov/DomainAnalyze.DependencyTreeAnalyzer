@@ -212,6 +212,12 @@ namespace DomainAnalyze.DependencyTree.Services.DependencyTreeAnalyzer
         {
             var compilation = await project.GetCompilationAsync();
 
+            foreach (var diagnostic in compilation.GetDiagnostics())
+            {
+                if (diagnostic.Severity == DiagnosticSeverity.Error)
+                    throw new Exception("Для первоначального построения модели анализа решение не должно содержать ошибок компиляции");
+            }
+
             foreach (var doc in project.Documents)
             {
                 await ExtractDocumentTypes(project, compilation, doc, rewrite);
@@ -268,6 +274,14 @@ namespace DomainAnalyze.DependencyTree.Services.DependencyTreeAnalyzer
                 {
                     CompilationCashModel compilationCashModel = DependenciesTreeState[projectChange.NewProject];
                     var newCompilation = await projectChange.NewProject.GetCompilationAsync();
+
+                    var diagnostics = newCompilation.GetDiagnostics();
+
+                    foreach (var diagnostic in diagnostics)
+                    {
+                        if (diagnostic.Severity == DiagnosticSeverity.Error)
+                            throw new Exception("Ошибка компиляции");
+                    }
 
                     FileInfo projectFileInfo = new FileInfo(projectChange.OldProject.FilePath);
                     DateTime lastProjectFileUpdate = projectFileInfo.LastWriteTime;
@@ -427,12 +441,7 @@ namespace DomainAnalyze.DependencyTree.Services.DependencyTreeAnalyzer
                         continue;
 
                     BuildDependenciesList(implementation);
-                    //SearchOwnMethodInvocations(implementation);
                 }
-
-                //var fieldSubnode = SymbolTree[dependency];
-
-                //SearchFieldInvocations(fieldSubnode);
             }
 
             DependencyStack.Pop();
