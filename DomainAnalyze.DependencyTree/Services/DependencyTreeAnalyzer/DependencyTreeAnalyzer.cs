@@ -672,26 +672,6 @@ namespace DomainAnalyze.DependencyTree.Services.DependencyTreeAnalyzer
                 .Select(item => item.Parent as IInvocationOperation)
                 .Where(item => item is not null).ToList();
 
-                foreach (var invocation in propertiesRefInvocations)
-                {
-                    var methodModel = DependenciesTreeState.AddOrGetMethod(fieldType.Project, documentModel.SemanticModel, documentModel.Document, invocation.TargetMethod, rewrite);
-
-                    if (rewrite)
-                    {
-                        methodModel.MethodOuterInvocations.Remove(field.FieldSymbol);
-                    }
-
-                    if (!rewrite && methodModel.MethodOuterInvocations.TryGetValue(field.FieldSymbol, out var invocations))
-                    {
-                        invocations.Add(invocation);
-                    }
-                    else
-                    {
-                        invocations = [invocation];
-                        methodModel.MethodOuterInvocations.Add(field.FieldSymbol, invocations);
-                    }
-                }
-
                 var fieldsRefInvocations = methodBody
                     .Descendants()
                     .OfType<IFieldReferenceOperation>()
@@ -699,23 +679,28 @@ namespace DomainAnalyze.DependencyTree.Services.DependencyTreeAnalyzer
                     .Select(item => item.Parent as IInvocationOperation)
                     .Where(item => item is not null).ToList();
 
-                foreach (var invocation in fieldsRefInvocations)
+                var invocationsGroupedByMethod = propertiesRefInvocations.Union(fieldsRefInvocations).GroupBy(item => item.TargetMethod, MethodSymbolEqualityComparer.Instance);
+
+                foreach (var methodInvocations in invocationsGroupedByMethod)
                 {
-                    var methodModel = DependenciesTreeState.AddOrGetMethod(fieldType.Project, documentModel.SemanticModel, documentModel.Document, invocation.TargetMethod);
+                    var methodModel = DependenciesTreeState.AddOrGetMethod(fieldType.Project, documentModel.SemanticModel, documentModel.Document, methodInvocations.Key, rewrite);
 
                     if (rewrite)
                     {
                         methodModel.MethodOuterInvocations.Remove(field.FieldSymbol);
                     }
 
-                    if (methodModel.MethodOuterInvocations.TryGetValue(field.FieldSymbol, out var invocations))
+                    foreach (var invocation in methodInvocations)
                     {
-                        invocations.Add(invocation);
-                    }
-                    else
-                    {
-                        invocations = [invocation];
-                        methodModel.MethodOuterInvocations.Add(field.FieldSymbol, invocations);
+                        if (methodModel.MethodOuterInvocations.TryGetValue(field.FieldSymbol, out var invocations))
+                        {
+                            invocations.Add(invocation);
+                        }
+                        else
+                        {
+                            invocations = [invocation];
+                            methodModel.MethodOuterInvocations.Add(field.FieldSymbol, invocations);
+                        }
                     }
                 }
             }
