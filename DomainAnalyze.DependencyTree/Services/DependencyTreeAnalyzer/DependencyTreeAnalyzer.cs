@@ -208,10 +208,12 @@ namespace DomainAnalyze.DependencyTree.Services.DependencyTreeAnalyzer
         {
             var compilation = await project.GetCompilationAsync();
 
-            foreach (var diagnostic in compilation.GetDiagnostics())
+            var errorDiagnostics = compilation.GetDiagnostics().Where(item => item.Severity == DiagnosticSeverity.Error);
+            if (errorDiagnostics.Any())
             {
-                if (diagnostic.Severity == DiagnosticSeverity.Error)
-                    throw new Exception("Для первоначального построения модели анализа решение не должно содержать ошибок компиляции");
+                throw new Exception("Для первоначального построения модели анализа решение не должно содержать ошибок компиляции." +
+                    Environment.NewLine + "Ошибки:" + Environment.NewLine +
+                    string.Join(Environment.NewLine, errorDiagnostics));
             }
 
             foreach (var doc in project.Documents)
@@ -645,6 +647,8 @@ namespace DomainAnalyze.DependencyTree.Services.DependencyTreeAnalyzer
                 var syntaxTree = method.DeclaringSyntaxReferences.FirstOrDefault().SyntaxTree;
 
                 var documentModel = DependenciesTreeState[syntaxTree];
+
+                var currentMethodModel = DependenciesTreeState.AddOrGetMethod(fieldType.Project, documentModel.SemanticModel, documentModel.Document, method, rewrite);
 
                 var methodBody = method.GetMethodBodyOperation(documentModel.SemanticModel);
 
