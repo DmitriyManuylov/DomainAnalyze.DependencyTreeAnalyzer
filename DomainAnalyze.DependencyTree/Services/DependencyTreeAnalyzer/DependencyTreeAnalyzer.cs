@@ -297,7 +297,18 @@ namespace DomainAnalyze.DependencyTree.Services.DependencyTreeAnalyzer
 
                         if (documentFileInfo.LastAccessTime > oldDocumentModel.LastUpdate)
                         {
-                            await OnDocumentChangedInnerAsync(compilationCashModel, oldDocumentModel, newDocument);
+                            try
+                            {
+                                await OnDocumentChangedInnerAsync(compilationCashModel, oldDocumentModel, newDocument);
+                            }
+                            catch (DocumentCompilationException ex)
+                            {
+
+                            }
+                            catch
+                            {
+
+                            }
                         }
                     }
                 }
