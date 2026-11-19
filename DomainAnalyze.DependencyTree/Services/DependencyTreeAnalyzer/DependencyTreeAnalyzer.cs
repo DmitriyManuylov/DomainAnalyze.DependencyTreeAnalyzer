@@ -381,7 +381,7 @@ namespace DomainAnalyze.DependencyTree.Services.DependencyTreeAnalyzer
             existDocumentModel.ResetDocumentModel(semanticModel, newDocument, documentFileInfo.LastWriteTime);
 
             List<NamedTypeCashModel> typesToRemove = [];
-            List<NamedTypeCashModel> projectDIImplementations = [];
+            List<NamedTypeCashModel> projectDIImplementationsAndRoots = [];
 
             foreach (var type in existDocumentModel.NamedTypeList.AsEnumerable())
             {
@@ -392,8 +392,8 @@ namespace DomainAnalyze.DependencyTree.Services.DependencyTreeAnalyzer
                     continue;
                 }
 
-                if (DIImplementations.Contains(type))
-                    projectDIImplementations.Add(type);
+                if (DIImplementations.Contains(type) || DIRoots.Contains(type))
+                    projectDIImplementationsAndRoots.Add(type);
             }
 
             foreach (var type in typesToRemove)
@@ -403,7 +403,7 @@ namespace DomainAnalyze.DependencyTree.Services.DependencyTreeAnalyzer
                 DependenciesTreeState.RemoveType(type);
             }
 
-            foreach (var type in projectDIImplementations)
+            foreach (var type in projectDIImplementationsAndRoots)
             {
                 var dependencies = FindTypeDependencies(type);
 
@@ -413,7 +413,7 @@ namespace DomainAnalyze.DependencyTree.Services.DependencyTreeAnalyzer
                     var dependencyModel = SymbolTree[dependencyField];
 
                     if (dependencyModel is not null)
-                        SearchFieldInvocations(dependencyModel);
+                        SearchFieldInvocations(dependencyModel, true);
 
                     if (InterfacesImplementations.ContainsKey(dependencyTypeModel))
                         continue;
@@ -421,7 +421,7 @@ namespace DomainAnalyze.DependencyTree.Services.DependencyTreeAnalyzer
                     BuildDependenciesList(dependencyTypeModel);
                 }
 
-                SearchOwnMethodInvocations(type);
+                SearchOwnMethodInvocations(type, true);
             }
 
             OnDocumentChanged(existDocumentModel, newDocument);
