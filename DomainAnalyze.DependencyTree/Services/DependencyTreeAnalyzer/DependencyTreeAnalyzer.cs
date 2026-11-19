@@ -703,17 +703,18 @@ namespace DomainAnalyze.DependencyTree.Services.DependencyTreeAnalyzer
                 {
                     var methodModel = DependenciesTreeState.AddOrGetMethod(fieldType.Project, documentModel.SemanticModel, documentModel.Document, invocation.TargetMethod);
 
+                    if (rewrite)
+                    {
+                        methodModel.MethodOuterInvocations.Remove(field.FieldSymbol);
+                    }
+
                     if (methodModel.MethodOuterInvocations.TryGetValue(field.FieldSymbol, out var invocations))
                     {
                         invocations.Add(invocation);
                     }
                     else
                     {
-                        invocations = new List<IInvocationOperation>()
-                        {
-                            invocation
-                        };
-
+                        invocations = [invocation];
                         methodModel.MethodOuterInvocations.Add(field.FieldSymbol, invocations);
                     }
                 }
